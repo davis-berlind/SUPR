@@ -12,7 +12,8 @@ beta[201] <- 3
 beta[401] <- -5
 
 lambda <- rep(1, T)
-lambda[301:T] <- 10
+lambda[201:400] <- 10
+lambda[401:T] <- 3
 
 y <- rnorm(T, mean = X %*% beta, sd = sqrt(1 / lambda))
 

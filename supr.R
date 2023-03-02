@@ -1,4 +1,9 @@
-# helper functions
+#### helper functions #### 
+
+prod_l <- function(l, mat) {
+  apply(mat[,-l], 1, prod)
+}
+
 
 revcumsum <- function(x){
   rev(cumsum(rev(x)))
@@ -8,7 +13,12 @@ lambda_update <- function(u, v, prob) {
   cumsum((u / v) * prob) + c(revcumsum(prob[-1]), 0)
 }
 
-# main function
+mu_update <- function(y, lambda2, lambda2_l, beta_lambda) {
+  L <- ncol(lambda2_l)
+  revcumsum(y * lambda2 + cumsum(rowSums(beta_lambda * sapply(1:L, prod_l, lambda2_l))))
+}
+
+#### Main #### 
 
 supr <- function(y, sigma2 = 1, sigma2_0, K, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1e-3) {
   
@@ -100,6 +110,77 @@ supr <- function(y, sigma2 = 1, sigma2_0, K, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1e
               alpha = alpha_post, v = v_post, u = u_post,
               beta = beta, lambda2 = lambda2))
 }
+
+supr_sim <- function(y, sigma2 = 1, sigma2_0, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1e-3) {
+  # model parameters
+  T <- length(y)
+  
+  # uniform prior on change point locations
+  pi <- 1 / T    
+
+  # initializing posterior parameters
+  
+  gamma_post <- matrix(1 / T, nrow = T, ncol = L)
+
+  mu_post <- matrix(0, nrow = T, ncol = L)
+  sigma_post <- matrix(1, nrow = T, ncol = L)
+  beta <- mu_post * gamma_post
+  u_post <- u_0 + (T - 1:T + 1) / 2
+  v_post <- matrix(u_post, nrow = T, ncol = L)
+  
+  lambda2_l <- matrix(0, nrow = T, ncol = L)
+  
+  for (l in 1:L) {
+    lambda2_l[,l] <- lambda_update(u_post, v_post[,l], gamma_post[,l])
+  }
+  
+  lambda2 <- apply(lambda2_l, 1, prod)
+  
+  beta_lambda <- mu_post * (u_post / v_post) * gamma_post
+  beta2_lambda <- (mu_post^2 + sigma_post) * (u_post / v_post) * gamma_post
+  
+  # store current parameter values
+  params <- c(sigma_post, mu_post, gamma_post, v_post)
+  
+  while (TRUE) {
+    new_params <- c()
+    
+    for (l in 1:L) {
+      lambda2 <- lambda2 / lambda2_l[,l]
+      
+      # updating q(b_i | gamma_i)
+      s2_lj <- u_post / v_post[,l]
+      sigma_post[,l] <- 1 / (s2_lj * revcumsum(lambda2) / sigma2 + 1 / sigma2_0)
+      mu_post[,l] <- (s2_lj * sigma_post[,l] / sigma2) * mu_update(y, lambda2, lambda2_l[,-l], beta_lambda[,-l])
+      
+      # updating q(s^2_i | gamma_i)
+      v_post[,l] <- v_update(y, lambda2, lambda2_l[,-l], beta_lambda[,-l], beta2_lambda[,-l], mu_post[,l], sigma_post[,l]) / (2 * sigma2) + v_0
+    }
+  }
+}
+
+v_update <- function(y, lambda2, lambda2_l, beta_lambda, beta2_lambda, mu_l, sigma2_l){
+  L <- ncol(lambda2_l)
+  v <- revcumsum(lambda2 * y^2) + (mu_l^2 + sigma2_l) * revcumsum(lambda2) - 2 * mu_l * revcumsum(lambda2 * y)
+  xbl <- cumsum(rowSums(beta_lambda * sapply(1:L, prod_l, lambda2_l)))
+  v <- v + 2 * (mu_l * revcumsum(xbl) - revcumsum(y * xbl))
+  v <- v + revcumsum(rowSums(apply(beta2_lambda, 2, cumsum) * sapply(1:L, prod_l, lambda2_l)))
+  beta_lambda_cs <- apply(beta_lambda, 2, cumsum)
+  bxxb <- rep(0, length(v))
+  for (i in 1:L) {
+    for (j in 1:L) {
+      if (i == j) {
+        next
+      } else {
+        bxxb <- bxxb + beta_lambda_cs[,l] * beta_lambda_cs[,l] * prod_l(c(i,j), lambda2_l)
+      }
+    }
+  }
+  return(v + revcumsum(bxxb))
+}
+
+
+#### Post Processing #### 
 
 cred_set <- function(probs, level = 0.9) {
   L <- ncol(probs) 
