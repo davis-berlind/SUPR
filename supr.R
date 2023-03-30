@@ -46,7 +46,7 @@ supr <- function(y, sigma2 = 1, sigma2_0, K, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1e
   params <- c(sigma_post, mu_post, gamma_post, v_post, alpha_post)
   
   # initialize residual
-  r_bar <- y - rowSums(apply(beta,2,cumsum))
+  r_bar <- y - rowSums(apply(beta, 2, cumsum))
   
   n_iter <- 1
   
@@ -106,6 +106,7 @@ supr <- function(y, sigma2 = 1, sigma2_0, K, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1e
 }
 
 supr_sim <- function(y, sigma2 = 1, sigma2_0, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1e-3) {
+  
   # model parameters
   T <- length(y)
   
@@ -241,15 +242,72 @@ v_update <- function(y, lambda2, lambda2_l, beta_lambda, beta2_lambda, mu_l, sig
 
 #### Post Processing #### 
 
-cred_set <- function(probs, level = 0.9) {
-  L <- ncol(probs) 
+cred_set_susie <- function(probs, level = 0.95) {
+  L <- ncol(probs)
+  T <- nrow(probs)
+  probs <- probs[-T,]
   cs <- list()
   for(l in 1:L) {
-    set <- order(probs[,l],decreasing = TRUE)[1:which.max(cumsum(probs[order(probs[,l], decreasing = TRUE), l]) > level)]
-    cs[[l]] <- set
+    set <- order(probs[,l], decreasing = TRUE)[1:which.max(cumsum(probs[order(probs[,l], decreasing = TRUE), l]) > level)]
+    if(length(set) == 1) {
+      cs <- c(cs, list(set))
+      next
+    } 
+    cmbs <- combn(set, 2)
+    i <- cmbs[1,]
+    j <- cmbs[2,]
+    purity <- min(exp(log(abs(T * min(i,j) - j * i)) - 0.5 * (log(j) + log(T - j) + log(i) + log(T - i))))
+    if (purity > 0.5) {
+      cs <- c(cs,list(set))
+    }
   }
+  
+  if (length(cs) == 0) return(cs)
+  
+  cs <- unique(cs)
+  nset <- length(cs)
+  subset <- c()
+  for (i in 1:nset) {
+    for(j in 1:nset) {
+       if (i == j) next
+       if (length(setdiff(cs[[i]], cs[[j]])) == 0) subset <- c(subset, i)
+    }
+  }
+  
+  if (length(subset) > 0) cs[[subset]] <- NULL
+  
   return(cs)
 }
 
-cred_set(alpha_post)
-cred_set(gamma_post)
+cred_set_prisca <- function(probs, level = 0.95) {
+  L <- ncol(probs)
+  T <- nrow(probs)
+  cs <- list()
+  for(l in 1:L) {
+    set <- order(probs[,l], decreasing = TRUE)[1:which.max(cumsum(probs[order(probs[,l], decreasing = TRUE), l]) > level)]
+    if (length(set) <= T / 2) {
+      cs <- c(cs,list(set))
+    }
+  }
+  
+  if (length(cs) == 0) return(cs)
+  
+  cs <- unique(cs)
+  nset <- length(cs)
+  subset <- c()
+  for (i in 1:nset) {
+    for(j in 1:nset) {
+      if (i == j) next
+      if (length(setdiff(cs[[i]], cs[[j]])) == 0) subset <- c(subset, i)
+    }
+  }
+  
+  if (length(subset) > 0) cs[[subset]] <- NULL
+  
+  return(cs)
+}
+
+cred_set_prisca(supr_mod$alpha)
+cred_set_susie(supr_mod$gamma)
+cred_set_prisca(supr_mod$gamma)
+
