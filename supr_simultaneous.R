@@ -8,14 +8,15 @@ supr_sim_single <- function(y, sigma2, sigma2_0, u_0, v_0) {
   
   # posterior parameters
   
-  # location component
+  # updating q(b_i | s_i^2, gamma_i)
   sigma2_ij <- 1 / ((T - 1:T + 1) / sigma2 + 1 / sigma2_0)
   mu_ij <- (sigma2_ij / sigma2) * revcumsum(y)
     
-  # scale component
+  # updating q(s^2_i | gamma_i)
   u_ij <- u_0 + (T - 1:T + 1) / 2
   v_ij <- v_0 - mu_ij^2 / (2 * sigma2_ij) + revcumsum(y^2) / (2 * sigma2)
   
+  # updating q(gamma_i)
   log_C_ij <- log(pi) + 0.5 * log(sigma2_ij) + lgamma(u_ij) - u_ij * log(v_ij) - c(0, cumsum(y^2))[-(T+1)] / (2 * sigma2)
   pi_ij <- prop.table(exp(log_C_ij - max(log_C_ij)))
   
@@ -37,19 +38,13 @@ supr_sim <- function(y, sigma2 = 1, sigma2_0, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1
   pi <- 1 / T    
   
   # initializing posterior parameters
-  
-  # gamma_post <- matrix(1 / T, nrow = T, ncol = L)
-  pi_ij <- matrix(0, nrow = T, ncol = L)
-  pi_ij[201,1] <- 1
-  pi_ij[401,2] <- 1
-  pi_ij[,-c(1,2)] <- 1/T
-  
+  pi_ij <- matrix(1 / T, nrow = T, ncol = L)
   mu_ij <- matrix(0, nrow = T, ncol = L)
   sigma2_ij <- matrix(1, nrow = T, ncol = L)
-  # beta <- mu_post * gamma_post
   u_ij <- u_0 + (T - 1:T + 1) / 2
   v_ij <- matrix(u_ij, nrow = T, ncol = L)
   
+  # intermediate calculations
   lambda2_l <- matrix(0, nrow = T, ncol = L)
   
   for (l in 1:L) {
@@ -68,27 +63,24 @@ supr_sim <- function(y, sigma2 = 1, sigma2_0, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1
   
   n_iter <- 1
   
+  # vb routine
   while (TRUE) {
-    
-    new_params <- c()
     
     for (i in 1:L) {
       
-      lambda2 <- lambda2 / lambda2_l[,i]
-      lambda2_minus_ij <- lambda2 / lambda2_l[,-i]
+      lambda2 <- lambda2 / lambda2_l[,i]           # factor out ith precision
+      lambda2_minus_ij <- lambda2 / lambda2_l[,-i] # factor out jth precision, j =/= i 
       
+      # calculate \sum_{k \neq i} x'_t E[\beta_k \lambda^2_{k,t}] \prod_{\ell \neq k,i} E[\lambda_{\ell,t}^2]
       if (L == 2) xbl <- beta_lambda2_cs[,-i] * lambda2_minus_ij
       else xbl <- rowSums(beta_lambda2_cs[,-i] * lambda2_minus_ij)
       
-      # updating q(b_i | gamma_i)
-      
+      # updating q(b_i | s_i^2, gamma_i)
       sigma2_ij[,i] <- 1 / (revcumsum(lambda2) / sigma2 + 1 / sigma2_0)
       mu_ij[,i] <- (sigma2_ij[,i] / sigma2) * revcumsum(y * lambda2 - xbl)
       
       # updating q(s^2_i | gamma_i)
-      
-      # the problem is the next couple of lines
-      
+      # calculate sum_{k \neq i} sum_{k' \neq i} E[\beta'_{k'} x_t x'_t \beta_k prod_{\ell \neq i} \lambda_{\ell,t}^2]
       if (L == 2) bxxb <- beta2_lambda2_cs[,-i] * lambda2_minus_ij
       else bxxb <- rowSums(beta2_lambda2_cs[,-i] * lambda2_minus_ij)
       
@@ -103,20 +95,22 @@ supr_sim <- function(y, sigma2 = 1, sigma2_0, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1
       v_ij[,i] <- v_0 - mu_ij[,i]^2 / (2 * sigma2_ij[,i]) + revcumsum(lambda2 * y^2 + bxxb - 2 * y * xbl) / (2 * sigma2)
       
       # updating q(gamma_i)
-      
-      # gamma_post[,l] <- log(pi) + lgamma(u_post) - u_post * log(v_post[,l]) + 0.5 * log(sigma_post[,l]) - cumsum(c(0, v_f))[-(T+1)] / (2 * sigma2)
-      # gamma_post[,l] <- prop.table(exp(gamma_post[,l] - max(gamma_post[,l])))
+      log_C_ij <- log(pi) + 0.5 * log(sigma2_ij[,i]) + lgamma(u_ij) - u_ij * log(v_ij[,i]) - c(0, cumsum(lambda2 * y^2 + bxxb - 2 * y * xbl))[-(T+1)] / (2 * sigma2)
+      pi_ij[,i] <- prop.table(exp(log_C_ij - max(log_C_ij)))
       
       # intermediate updates
-      
       lambda2_l[,i] <- lambda_update(u_ij, v_ij[,i], pi_ij[,i])
       lambda2 <- lambda2 * lambda2_l[,i]
       
       beta_lambda2[,i] <- mu_ij[,i] * (u_ij / v_ij[,i]) * pi_ij[,i]
       beta_lambda2_cs[,i] <- cumsum(beta_lambda2[,i])
+      
       beta2_lambda2[,i] <- (mu_ij[,i]^2 * (u_ij / v_ij[,i]) + sigma2_ij[,i]) * pi_ij[,i]
       beta2_lambda2_cs[,i] <- cumsum(beta2_lambda2[,i])
+      
     }
+    
+    new_params <- c(sigma2_ij, mu_ij, pi_ij, v_ij)
     
     # l^2 convergence check
     if (sqrt(sum((params - new_params)^2)) < tol) break
