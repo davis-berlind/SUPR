@@ -81,9 +81,10 @@ supr_sim <- function(y, sigma2 = 1, sigma2_0, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1
       
       # updating q(s^2_i | gamma_i)
       # calculate sum_{k \neq i} sum_{k' \neq i} E[\beta'_{k'} x_t x'_t \beta_k prod_{\ell \neq i} \lambda_{\ell,t}^2]
-      if (L == 2) bxxb <- beta2_lambda2_cs[,-i] * lambda2_minus_ij
+      if (L == 2) bxxb <- beta2_lambda2_cs[,-i] * lambda2_minus_ij    # when L = 2, taking out ith column turns everything to a vector
       else bxxb <- rowSums(beta2_lambda2_cs[,-i] * lambda2_minus_ij)
       
+      # note there are only cross-product terms when  L > 2
       if (L > 2) {
         for (l in 1:(L-2)) {
           for (j in (l+1):(L-1)) {
@@ -114,12 +115,12 @@ supr_sim <- function(y, sigma2 = 1, sigma2_0, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1
     
     # l^2 convergence check
     if (sqrt(sum((params - new_params)^2)) < tol) break
-    if (n_iter %% 100 == 0) print(paste("Iteration", n_iter))
+    if (n_iter %% 1000 == 0) print(paste("Iteration", n_iter))
     n_iter <- n_iter + 1
     params <- new_params
   }
   
-  return(list(gamma = pi_ij, mu = mu_ij, sigma = sigma2_ij, 
+  return(list(pi = pi_ij, mu = mu_ij, sigma2 = sigma2_ij, 
               v = v_ij, u = u_ij,
               beta = mu_ij * pi_ij, lambda2 = lambda2))
 }

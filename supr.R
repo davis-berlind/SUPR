@@ -1,127 +1,257 @@
 #### helper functions #### 
 
-prod_l <- function(l, mat) {
-  apply(mat[,-l], 1, prod)
-}
-
 revcumsum <- function(x){
   rev(cumsum(rev(x)))
 }
 
-lambda_update <- function(u, v, prob) {
+lambda_bar_fn <- function(u, v, prob) {
   cumsum((u / v) * prob) + c(revcumsum(prob[-1]), 0)
+}
+
+prob_check <- function(probs, fit.intercept, n, T) {
+  test <- TRUE
+  if (is.null(probs)) {
+    probs <- matrix(1/T, ncol = n, nrow = T)
+  } else {
+    if (fit.intercept & nrow(probs) == (T + 1)) probs <- probs[-1,] / colSums(probs[-1,])  # delete prob that first point is a change if fitting intercept and too many pi
+    if (!is.numeric(probs)) test <- FALSE
+    if (is.array(probs) & (nrow(probs) != T | ncol(probs) != n | any(round(colSums(probs), 10) != 1))) test <- FALSE
+  }
+  if (test) return(probs)
+  else return(NULL)
+}
+
+prior_check <- function(prior, n) {
+  test <- TRUE
+  if (!is.numeric(prior)) test <- FALSE
+  else if (any(prior < 0) | (length(prior) > 1 & length(prior) != n)) test <- FALSE
+  if (!test) return(NULL)
+  else if (length(prior) == 1) return(rep(prior, n))
+  else return (prior)
+}
+
+ng <- function(y, lambda, tau, v) {
+  tau <- sum(lambda) + tau
+  mu <- sum(y * lambda) / tau
+  v <- v - (tau * mu^2) / 2 + sum(lambda * y^2) / 2
+  return(list(tau = tau, mu = mu, v = v))
+} 
+
+smcp <- function(y, pi, tau, lambda) {
+  tau <- tau + revcumsum(lambda) 
+  mu <- revcumsum(lambda * y) / tau
+  log_pi <- log(pi) - 0.5 * log(tau) + (tau * mu^2) / 2
+  pi <- prop.table(exp(log_pi - max(log_pi)))
+  return(list(tau = tau, mu = mu, pi = pi))
+}
+
+sscp <- function(y, omega, u, v) {
+  T <- length(y)
+  v <- v + revcumsum(y^2) / 2
+  u <- u + (T - 1:T + 1) / 2
+  log_omega <- log(omega) + lgamma(u) - u * log(v) - cumsum(c(0,y[-T]^2)) / 2 
+  omega <- prop.table(exp(log_omega - max(log_omega)))
+  return(list(v = v, omega = omega))
 }
 
 #### Main #### 
 
-supr <- function(y, sigma2 = 1, sigma2_0, K, L, tol = 1e-5, u_0 = 1e-3, v_0 = 1e-3) {
+supr <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
+                 tau = 0.1, u = 1e-3, v = 1e-3, tau_0 = 0.1, u_0 = 1e-3, v_0 = 1e-3,
+                 pi = NULL, omega = NULL) {
+  
+  if (!is.numeric(y)) stop("y must be a numeric vector.")
   
   # model parameters
-  T <- length(y)
-  
-  # uniform prior on change point locations
-  pi <- 1 / T    
-  omega <- 1 / T
-  
-  # initializing posterior parameters
-  pi_ij <- matrix(1 / T, nrow = T, ncol = L)
-  mu_ij <- matrix(0, nrow = T, ncol = L)
-  sigma2_ij <- rep(1, length = T)
-  beta <- mu_ij * pi_ij
-  
-  omega_ij <- matrix(1 / T, nrow = T, ncol = K)
-  u_ij <- u_0 + (T - 1:T + 1) / 2
-  v_ij <- matrix(u_ij, nrow = T, ncol = K)
-  lambda2_k <- matrix(0, nrow = T, ncol = K)
-  
-  for (k in 1:K) {
-    lambda2_k[,k] <- lambda_update(u_ij, v_ij[,k], omega_ij[,k])
+  if (fit.intercept) {
+    y_0 <- y[1]
+    y <- y[-1]
   }
   
-  lambda2 <- apply(lambda2_k, 1, prod)
+  T <- length(y)
+  
+  # checking that priors are proper
+  tau <- prior_check(tau, L)
+  if (is.null(tau)) stop("tau must either be a positive number or length L vector of positive number.")
+  u <- prior_check(u, K)
+  if (is.null(u)) stop("u must either be a positive number or length K vector of positive number.")
+  v <- prior_check(v, K)
+  if (is.null(v)) stop("v must either be a positive number or length K vector of positive numbers.")
+  
+  if (fit.intercept) {
+    tau_0 <- prior_check(tau_0, 1)
+    if (is.null(tau)) stop("tau must be a positive number")
+    u_0 <- prior_check(u_0, 1)
+    if (is.null(u)) stop("u_0 must either be a positive number.")
+    v_0 <- prior_check(v_0, 1)
+    if (is.null(v_0)) stop("v_0 must be a positive number.")
+  }
+  
+  # uniform prior on change point locations if not specified
+  pi <- prob_check(pi, fit.intercept, L, T)
+  if(is.null(pi)) stop("If given, pi must be a T x L matrix with columns that sum to one.")
+  omega <- prob_check(omega, fit.intercept, K, T)
+  if(is.null(omega)) stop("If given, omega must be a T x K matrix with columns that sum to one.")
+  
+  # initializing posterior parameters
+  
+  # mean components
+  pi_bar_ij <- matrix(1 / T, nrow = T, ncol = L)
+  mu_bar_ij <- matrix(0, nrow = T, ncol = L)
+  tau_bar_ij <- matrix(1, nrow = T, ncol = L)
+  beta_bar_l <- apply(pi_bar_ij * mu_bar_ij, 2, cumsum)
+  var_beta <- rowSums(apply(pi_bar_ij * (mu_bar_ij^2 + 1 / tau_bar_ij), 2, cumsum) - beta_bar_l^2)
+
+  # scale components
+  omega_bar_ij <- matrix(1 / T, nrow = T, ncol = K)
+  u_bar_ij <- matrix(u, nrow = T, ncol = K, byrow = TRUE) + (T - 1:T + 1) / 2
+  v_bar_ij <- matrix(revcumsum(y^2) + var_beta, nrow = T, ncol = K)
+  lambda_bar_k <- matrix(0, nrow = T, ncol = K)
+  
+  for (k in 1:K) {
+    lambda_bar_k[,k] <- lambda_bar_fn(u_bar_ij[,k], v_bar_ij[,k], omega_bar_ij[,k])
+  }
+  
+  lambda_bar <- apply(lambda_bar_k, 1, prod)
   
   # store current parameter values
-  params <- c(sigma2_ij, mu_ij, pi_ij, v_ij, omega_ij)
+  params <- c(tau_bar_ij, mu_bar_ij, pi_bar_ij, v_bar_ij, omega_bar_ij)
   
+  # intercept parameters
+  if (fit.intercept) {
+    ng_fit <- ng(c(y_0, y), c(1, lambda_bar), tau_0, v_0 + sum(lambda_bar * var_beta) / 2)
+    
+    mu_bar_0 <- ng_fit$mu
+    tau_bar_0 <- ng_fit$tau
+    v_bar_0 <- ng_fit$v
+    u_bar_0 <- (T + 1) / 2 + u_0
+    
+    s_bar_0 <- u_bar_0 / v_bar_0 
+    lambda_bar <- s_bar_0 * lambda_bar
+    
+    params <- c(mu_bar_0, v_bar_0, params)
+  }
+
   # initialize residual
-  r_bar <- y - rowSums(apply(beta, 2, cumsum))
+  r_bar <- y - ifelse(fit.intercept, mu_bar_0, 0)
   
   n_iter <- 1
   
   while (TRUE) {
     
     new_params <- c()
-    sigma2_ij <- 1 / (revcumsum(lambda2) / sigma2 + 1 / sigma2_0)
     
-    new_params <- c(new_params, sigma2_ij)
+    # updating q(b_0, s_0)
+    if (fit.intercept) {
+      lambda_bar <- lambda_bar / s_bar_0 # dividing out intercept precision
+      
+      r_bar <- r_bar + mu_bar_0 # intercept partial residual
+      
+      ng_fit <- ng(c(y_0, r_bar), c(1, lambda_bar), tau_0, v_0 + sum(lambda_bar * var_beta) / 2)
+      
+      mu_bar_0 <- ng_fit$mu
+      tau_bar_0 <- ng_fit$tau
+      v_bar_0 <- ng_fit$v
+      
+      r_bar <- r_bar - mu_bar_0 # full residual
+      s_bar_0 <- u_bar_0 / v_bar_0 # expected posterior intercept precision 
+      lambda_bar <- s_bar_0 * lambda_bar # multiplying by intercept precision
+      
+      new_params <- c(mu_bar_0, v_bar_0)
+    }
     
-    # mean update step
+    # updating q(b_i, gamma_i)
     for (l in 1:L) {
+      r_bar <- r_bar + beta_bar_l[,l] # mean partial residual 
       
-      r_bar <- r_bar + cumsum(beta[,l])
+      smcp_fit <- smcp(r_bar, pi[,l], tau[l], lambda_bar)
       
-      mu_ij[,l] <- (sigma2_ij / sigma2) * revcumsum(lambda2 * r_bar)
+      # store posterior parameters
+      mu_bar_ij[,l] <- smcp_fit$mu
+      tau_bar_ij[,l] <- smcp_fit$tau
+      pi_bar_ij[,l] <- smcp_fit$pi
       
-      pi_ij[,l] <- log(pi) + 0.5 * log(sigma2_ij) + mu_ij[,l]^2 / (2 * sigma2_ij)
-      pi_ij[,l] <- prop.table(exp(pi_ij[,l] - max(pi_ij[,l])))
-      
-      beta[,l] <- mu_ij[,l] * pi_ij[,l]
-      
-      r_bar <- r_bar - cumsum(beta[,l])
+      beta_bar_l[,l] <- cumsum(pi_bar_ij[,l] * mu_bar_ij[,l])
+      r_bar <- r_bar - beta_bar_l[,l] # adding l^{th} mean change back to residual
     }
     
-    new_params <- c(new_params, mu_ij, pi_ij)
+    var_beta <- rowSums(apply(pi_bar_ij * (mu_bar_ij^2 + 1 / tau_bar_ij), 2, cumsum) - beta_bar_l^2)
     
-    # precision update step
-    Xb2 <- rowSums(apply(beta,2,cumsum)^2)
+    z2_bar <- lambda_bar * (r_bar^2 + (v_bar_0 / (tau_bar_0 * (u_bar_0 - 1))) + var_beta) # full scale residual
     
+    # updating q(s_i, alpha_i)
+
     for (k in 1:K) {
-      lambda2 <- lambda2 / lambda2_k[,k]
+      z2_bar <- z2_bar / lambda_bar_k[,k] # partial scale residual
+      lambda_bar <- lambda_bar / lambda_bar_k[,k]
+        
+      sscp_fit <- sscp(sqrt(z2_bar), omega[,k], u[k], v[k])
+
+      # store posterior parameters
+      v_bar_ij[,k] <- sscp_fit$v
+      omega_bar_ij[,k] <- sscp_fit$omega
       
-      z2_tilde <- lambda2 * (r_bar^2 - Xb2 + cumsum(rowSums((mu_ij^2 + sigma2_ij) * pi_ij)))
-      
-      v_ij[,k] <- v_0 + revcumsum(z2_tilde) / (2 * sigma2)
-      
-      omega_ij[,k] <- log(omega) + lgamma(u_ij) - u_ij * log(v_ij[,k]) - cumsum(c(0,z2_tilde))[-(T+1)] / (2 * sigma2)
-      omega_ij[,k] <- prop.table(exp(omega_ij[,k] - max(omega_ij[,k])))
-      
-      lambda2_k[,k] <- lambda_update(u_ij, v_ij[,k], omega_ij[,k])
-      
-      lambda2 <- lambda2 * lambda2_k[,k]
+      lambda_bar_k[,k] <- lambda_bar_fn(u_bar_ij[,k], v_bar_ij[,k], omega_bar_ij[,k])
+      z2_bar <- z2_bar * lambda_bar_k[,k] # multiplying k^{th} mean change back to residual
+      lambda_bar <- lambda_bar * lambda_bar_k[,k]
     }
     
-    new_params <- c(new_params, v_ij, omega_ij)
+    new_params <- c(new_params, c(tau_bar_ij, mu_bar_ij, pi_bar_ij, v_bar_ij, omega_bar_ij))
     
     # l^2 convergence check
     if (sqrt(sum((params - new_params)^2)) < tol) break
-    if (n_iter %% 100 == 0) print(paste("Iteration", n_iter))
+    if (n_iter %% 1000 == 0) print(paste("Iteration", n_iter))
     n_iter <- n_iter + 1
     params <- new_params
   }
   
-  return(list(gamma = pi_ij, mu = mu_ij, sigma = sigma2_ij, 
-              alpha = omega_ij, v = v_ij, u = u_ij,
-              beta = beta, lambda2 = lambda2))
+  ret <- list(y = y, 
+              beta = rowSums(beta_bar_l),
+              lambda = lambda_bar,
+              pi = pi_bar_ij, mu = mu_bar_ij, sigma2 = 1 / tau_bar_ij, 
+              omega = omega_bar_ij, v = v_bar_ij, u = u_bar_ij,
+              fit.intercept = fit.intercept)
+  
+  if (fit.intercept) {
+    ret <- c(ret, list(mu_0 = mu_bar_0, u_0 = u_bar_0, v_0 = v_bar_0))
+    ret$y <- c(y_0, y)
+    ret$beta <- c(mu_bar_0, mu_bar_0 + ret$beta)
+    ret$lambda <- c(s_bar_0, ret$lambda)
+  }
+  
+  return(ret)
 }
 
 
 #### Post Processing #### 
 
-cred_set_susie <- function(probs, level = 0.95) {
+plot_supr_fit <- function(supr_fit, level = 0.95) {
+  alph <- (1 - level) / 2
+  q <- -qnorm(alph)
+  plot(supr_fit$y, ylim = c(min(supr_fit$y - q / sqrt(supr_fit$lambda)), max(supr_fit$y + q / sqrt(supr_fit$lambda))),
+       ylab = "")
+  lines(supr_fit$beta, col = "red", lwd = 3)
+  lines(supr_fit$beta - q / sqrt(supr_fit$lambda), lty = 3, col = "blue", lwd = 3)
+  lines(supr_fit$beta + q / sqrt(supr_fit$lambda), lty = 3, col = "blue", lwd = 3)
+}
+
+cred_set_susie <- function(probs, fit.intercept = TRUE, level = 0.95) {
   L <- ncol(probs)
-  T <- nrow(probs)
-  probs <- probs[-T,]
+  T <- nrow(probs) + fit.intercept
   cs <- list()
   for(l in 1:L) {
     set <- order(probs[,l], decreasing = TRUE)[1:which.max(cumsum(probs[order(probs[,l], decreasing = TRUE), l]) > level)]
+    set <- set[order(set)]
     if(length(set) == 1) {
       cs <- c(cs, list(set))
       next
     } 
     cmbs <- combn(set, 2)
-    i <- cmbs[1,]
-    j <- cmbs[2,]
-    purity <- min(exp(log(abs(T * min(i,j) - j * i)) - 0.5 * (log(j) + log(T - j) + log(i) + log(T - i))))
+    i <- cmbs[1,] + fit.intercept
+    j <- cmbs[2,] + fit.intercept
+    E_i <- 1 - (i - 1) / T  
+    E_j <- 1 - (j - 1) / T
+    purity <- min(sqrt(E_j) * (1 - E_i) / sqrt(E_i * (1 - E_i) * (1 - E_j)))
     if (purity > 0.5) {
       cs <- c(cs,list(set))
     }
@@ -171,8 +301,4 @@ cred_set_prisca <- function(probs, level = 0.95) {
   
   return(cs)
 }
-
-cred_set_prisca(supr_mod$alpha)
-cred_set_susie(supr_mod$gamma)
-cred_set_prisca(supr_mod$gamma)
 
