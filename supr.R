@@ -8,6 +8,8 @@ lambda_bar_fn <- function(u, v, prob) {
   cumsum((u / v) * prob) + c(revcumsum(prob[-1]), 0)
 }
 
+#### data formatting functions #### 
+
 prob_check <- function(probs, fit.intercept, n, T) {
   test <- TRUE
   if (is.null(probs)) {
@@ -29,6 +31,8 @@ prior_check <- function(prior, n) {
   else if (length(prior) == 1) return(rep(prior, n))
   else return (prior)
 }
+
+#### single change model functions #### 
 
 ng <- function(y, lambda, tau, v) {
   tau <- sum(lambda) + tau
@@ -222,8 +226,7 @@ supr <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
   return(ret)
 }
 
-
-#### Post Processing #### 
+#### plot functions #### 
 
 plot_supr_fit <- function(supr_fit, level = 0.95) {
   alph <- (1 - level) / 2
@@ -234,6 +237,8 @@ plot_supr_fit <- function(supr_fit, level = 0.95) {
   lines(supr_fit$beta - q / sqrt(supr_fit$lambda), lty = 3, col = "blue", lwd = 3)
   lines(supr_fit$beta + q / sqrt(supr_fit$lambda), lty = 3, col = "blue", lwd = 3)
 }
+
+#### credible set functions  #### 
 
 cred_set_susie <- function(probs, fit.intercept = TRUE, level = 0.95) {
   L <- ncol(probs)
