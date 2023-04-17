@@ -147,7 +147,7 @@ supr <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
       
       r_bar <- r_bar + mu_bar_0 # intercept partial residual
       
-      ng_fit <- ng(c(y_0, r_bar), c(1, lambda_bar), tau_0, v_0 + sum(lambda_bar * var_beta) / 2)
+      ng_fit <- ng(c(y_0, r_bar), c(1, lambda_bar), tau_0, v_0 + sum(lambda_bar * var_beta) / 2) # fit ng model on intercept residual
       
       mu_bar_0 <- ng_fit$mu
       tau_bar_0 <- ng_fit$tau
@@ -162,9 +162,9 @@ supr <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
     
     # updating q(b_i, gamma_i)
     for (l in 1:L) {
-      r_bar <- r_bar + beta_bar_l[,l] # mean partial residual 
+      r_bar <- r_bar + beta_bar_l[,l] # partial mean residual 
       
-      smcp_fit <- smcp(r_bar, pi[,l], tau[l], lambda_bar)
+      smcp_fit <- smcp(r_bar, pi[,l], tau[l], lambda_bar) # fit single smcp model on partial mean residual
       
       # store posterior parameters
       mu_bar_ij[,l] <- smcp_fit$mu
@@ -177,15 +177,15 @@ supr <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
     
     var_beta <- rowSums(apply(pi_bar_ij * (mu_bar_ij^2 + 1 / tau_bar_ij), 2, cumsum) - beta_bar_l^2)
     
-    z2_bar <- lambda_bar * (r_bar^2 + (v_bar_0 / (tau_bar_0 * (u_bar_0 - 1))) + var_beta) # full scale residual
+    z2_bar <- lambda_bar * (r_bar^2 + fit.intercept * (v_bar_0 / (tau_bar_0 * (u_bar_0 - 1))) + var_beta) # squared scale residual
     
     # updating q(s_i, alpha_i)
 
     for (k in 1:K) {
-      z2_bar <- z2_bar / lambda_bar_k[,k] # partial scale residual
-      lambda_bar <- lambda_bar / lambda_bar_k[,k]
+      z2_bar <- z2_bar / lambda_bar_k[,k] # squared partial scale residual
+      lambda_bar <- lambda_bar / lambda_bar_k[,k] # dividing out lambda_k
         
-      sscp_fit <- sscp(sqrt(z2_bar), omega[,k], u[k], v[k])
+      sscp_fit <- sscp(sqrt(z2_bar), omega[,k], u[k], v[k]) # fit single sscp model on partial scale residual
 
       # store posterior parameters
       v_bar_ij[,k] <- sscp_fit$v
@@ -193,7 +193,7 @@ supr <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
       
       lambda_bar_k[,k] <- lambda_bar_fn(u_bar_ij[,k], v_bar_ij[,k], omega_bar_ij[,k])
       z2_bar <- z2_bar * lambda_bar_k[,k] # multiplying k^{th} mean change back to residual
-      lambda_bar <- lambda_bar * lambda_bar_k[,k]
+      lambda_bar <- lambda_bar * lambda_bar_k[,k] # multiplying back lambda_k
     }
     
     new_params <- c(new_params, c(tau_bar_ij, mu_bar_ij, pi_bar_ij, v_bar_ij, omega_bar_ij))
