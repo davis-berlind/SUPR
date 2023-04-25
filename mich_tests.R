@@ -5,21 +5,21 @@ set.seed(10)
 
 T <- 800
 
-beta <- rep(1, T)
+beta <- rep(5, T)
 beta[201:400] <- 3
 beta[401:600] <- -2
 beta[601:T] <- -4
 
-lambda <- rep(2, T)
+lambda <- rep(3, T)
 lambda[201:400] <- 10
-lambda[401:T] <- .5
-#lambda[601:T] <- 2
+lambda[401:600] <- .5
+lambda[601:T] <- 2
 
 y <- rnorm(T, mean = beta, sd = sqrt(1 / lambda))
 
-supr_fit <- supr(y, K = 5, L = 5)
+mich_fit <- mich_ii(y, L = 5, fit.intercept = TRUE)
 
-plot_supr_fit(supr_fit)
+plot_mich(mich_fit)
 
 cred_set_prisca(supr_fit$pi)
 cred_set_prisca(supr_fit$omega)
