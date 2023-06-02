@@ -5,7 +5,7 @@ set.seed(10)
 
 T <- 800
 
-beta <- rep(5, T)
+beta <- rep(0, T)
 beta[201:400] <- 3
 beta[401:600] <- -2
 beta[601:T] <- -4
@@ -17,7 +17,11 @@ lambda[601:T] <- 2
 
 y <- rnorm(T, mean = beta, sd = sqrt(1 / lambda))
 
-mich_fit <- mich_ii(y, L = 5, fit.intercept = TRUE)
+diags <- c()
+for(i in 1:10) {
+  mich_fit <- mich_ii(y, L = i, fit.intercept = TRUE)
+  diags <- c(diags, sum(diag(round(t(mich_fit$pi) %*% mich_fit$pi,2))))
+}
 
 plot_mich(mich_fit)
 

@@ -2,7 +2,7 @@
 
 mich_i <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
                   tau = 0.1, u = 1e-3, v = 1e-3, tau_0 = 0.1, u_0 = 1e-3, v_0 = 1e-3,
-                  pi = NULL, omega = NULL) {
+                  pi = NULL, omega = NULL, verbose = FALSE) {
   
   if (!is.numeric(y) | !is.vector(y)) stop("y must be a numeric vector.")
   
@@ -121,7 +121,7 @@ mich_i <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
     
     var_beta <- rowSums(apply(pi_bar_ij * (mu_bar_ij^2 + 1 / tau_bar_ij), 2, cumsum) - beta_bar_l^2)
     
-    z2_bar <- lambda_bar * (r_bar^2 + fit.intercept * (v_bar_0 / (tau_bar_0 * (u_bar_0 - 1))) + var_beta) # squared scale residual
+    z2_bar <- lambda_bar * (r_bar^2 + ifelse(fit.intercept, v_bar_0 / (tau_bar_0 * (u_bar_0 - 1)), 0) + var_beta) # squared scale residual
     
     # updating q(s_i, alpha_i)
 
@@ -144,7 +144,7 @@ mich_i <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
     
     # l^2 convergence check
     if (sqrt(sum((params - new_params)^2)) < tol) break
-    if (n_iter %% 1000 == 0) print(paste0("Iteration ", n_iter,", Error: ", sqrt(sum((params - new_params)^2))))
+    if (verbose & n_iter %% 1000 == 0) print(paste0("Iteration ", n_iter,", Error: ", sqrt(sum((params - new_params)^2))))
     n_iter <- n_iter + 1
     params <- new_params
   }
@@ -158,6 +158,8 @@ mich_i <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
   
   if (fit.intercept) {
     ret <- c(ret, list(mu_0 = mu_bar_0, u_0 = u_bar_0, v_0 = v_bar_0))
+    ret$pi <- rbind(rep(0, L), ret$pi)
+    ret$omega <- rbind(rep(0, K), ret$omega)
     ret$y <- c(y_0, y)
     ret$beta <- c(mu_bar_0, mu_bar_0 + ret$beta)
     ret$lambda <- c(s_bar_0, ret$lambda)
@@ -170,7 +172,7 @@ mich_i <- function(y, L, K, tol = 1e-5, fit.intercept = TRUE,
 
 mich_ii <- function(y, L, tol = 1e-5, fit.intercept = TRUE,
                     tau = 0.1, u = 1e-3, v = 1e-3, tau_0 = 0.1, u_0 = 1e-3, v_0 = 1e-3,
-                    pi = NULL) {
+                    pi = NULL, verbose = FALSE) {
   
   if (!is.numeric(y) | !is.vector(y)) stop("y must be a numeric vector.")
   
@@ -276,7 +278,8 @@ mich_ii <- function(y, L, tol = 1e-5, fit.intercept = TRUE,
       lambda_bar <- lambda_bar / lambda_bar_l[,l] # divide out l^{th} precision component
       r_tilde <- r_tilde + beta_lambda[,l] # partial mean residual 
       var_beta <- var_beta - beta2_lambda[,l] + beta_lambda[,l]^2
-      delta_l <- revcumsum(lambda_bar * (var_beta + fit.intercept / (s_bar_0 * tau_bar_0))) / 2 # variance correction term
+      # variance correction term
+      delta_l <- revcumsum(lambda_bar * (var_beta + ifelse(fit.intercept, 1 / (s_bar_0 * tau_bar_0), 0))) / 2
       
       smscp_fit <- smscp(r_tilde, lambda_bar, tau[l], u[l], v[l] + delta_l, pi[,l]) # fit single smscp model on modified partial residual
       
@@ -299,7 +302,7 @@ mich_ii <- function(y, L, tol = 1e-5, fit.intercept = TRUE,
     
     # l^2 convergence check
     if (sqrt(sum((params - new_params)^2)) < tol) break
-    if (n_iter %% 1000 == 0) print(paste0("Iteration ", n_iter,", Error: ", sqrt(sum((params - new_params)^2))))
+    if (verbose & n_iter %% 1000 == 0) print(paste0("Iteration ", n_iter,", Error: ", sqrt(sum((params - new_params)^2))))
     n_iter <- n_iter + 1
     params <- new_params
     
@@ -314,6 +317,7 @@ mich_ii <- function(y, L, tol = 1e-5, fit.intercept = TRUE,
   
   if (fit.intercept) {
     ret <- c(ret, list(mu_0 = mu_bar_0, u_0 = u_bar_0, v_0 = v_bar_0))
+    ret$pi <- rbind(rep(0, L), ret$pi)
     ret$y <- c(y_0, y)
     ret$beta <- c(mu_bar_0, mu_bar_0 + ret$beta)
     ret$lambda <- c(s_bar_0, ret$lambda)

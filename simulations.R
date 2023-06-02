@@ -1,3 +1,4 @@
+
 set.seed(7)
 
 # simultion parameters
@@ -5,6 +6,7 @@ T <- c(200, 500, 1000)
 N <- 100
 loc_sd <- sqrt(10) # same order as (exp((log(10) / 2)^2) - 1) * exp((log(10) / 2)^2)
 scale_sd <- log(10) / 2 # justify this 
+min_space <- min(floor(sqrt(T)), 30)
 
 # supr parameters
 u_0 <- 0.001
@@ -12,9 +14,7 @@ v_0 <- 0.001
 sigma2_0 <- 10  # large enough?
 tol <- 1e-5 # max iter + relax tol 
 
-
-
-results <- data.frame(matrix(0,nrow = 0, ncol = 13))
+results <- data.frame(matrix(0, nrow = 0, ncol = 13))
 
 bias_loc <- rep(0, N) 
 bias_scl <- rep(0, N) 
@@ -90,14 +90,4 @@ names(results) <- c("T", "bias_loc", "bias_scl", "haus_loc", "haus_scl",
                     "length_loc", "length_scl", "precision_loc", "precision_scl",
                     "recall_loc", "recall_scl", "f_loc", "f_scl")
 
-point_picker <- function(T, K) {
-  space <- min(floor(sqrt(T)), 30)
-  valid <- 2:(T-2)
-  picked <- c()
-  for (k in 1:K) {
-    pick <- sample(valid, size = 1)
-    picked <- c(picked, pick)
-    valid <- valid[valid < pick - space | valid > pick + space]
-  }
-  return(picked)
-}
+
