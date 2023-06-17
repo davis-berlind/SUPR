@@ -12,25 +12,33 @@
 #' @return K change-points between 2:(T-1).
 #'
 point_picker <- function(T, K, min_space) {
+  if (min_space * K > T) stop("T must be greater than K * min_space")
   valid <- 2:(T-2) # current valid changepoint locations
   picked <- c()    # initialized sampled locations
   for (k in 1:K) {
     # sample change point from valid locations
-    picked <- c(picked, sample(valid, size = 1) )       
+    picked <- c(picked, sample(valid, size = 1))
     # update set of valid locations
     valid <- valid[valid < picked[k] - min_space | valid > picked[k] + min_space]
     if (length(valid) == 0) {
       picked <- point_picker(T, K, min_space) 
       break
     }
+    if (length(valid) == 1) {
+      if (k == K) {
+        picked <- c(picked, valid) 
+      } else {
+        picked <- point_picker(T, K, min_space)
+        break
+      }
+    }
   }
-  return(picked)
+  return(picked[order(picked)])
 }
 
 hsmuce_simulation <- function(T, K, C, min_space) {
   # sample changepoints
   chp <- point_picker(T, K, min_space)
-  chp <- chp[order(chp)]
   # sample variances
   s <- c(1, 2^runif(K, -2, 2))
   # generate means and signal
