@@ -1,7 +1,7 @@
 
 #' Random Change-Point Generator.
 #' 
-#' Randomly draws K change-points uniformly distributed between 2:(T-1) subject
+#' Randomly draws K change-points uniformly distributed between 1:T subject
 #' to a minimum spacing criterion
 #'
 #' @param T         An integer. Number of observations.
@@ -9,53 +9,48 @@
 #' @param min_space An integer. The minimum spacing criterion between 
 #'                  change-points
 #'
-#' @return K change-points between 2:(T-1).
+#' @return K change-points in 1:T.
 #'
 point_picker <- function(T, K, min_space) {
   if (min_space * K > T) stop("T must be greater than K * min_space")
-  valid <- 2:(T-2) # current valid changepoint locations
+  valid <- 1:T # current valid change-point locations
   picked <- c()    # initialized sampled locations
-  for (k in 1:K) {
+  for (k in 1:(K-1)) {
     # sample change point from valid locations
     picked <- c(picked, sample(valid, size = 1))
     # update set of valid locations
-    valid <- valid[valid < picked[k] - min_space | valid > picked[k] + min_space]
-    if (length(valid) == 0) {
-      picked <- point_picker(T, K, min_space) 
-      break
-    }
-    if (length(valid) == 1) {
-      if (k == K) {
-        picked <- c(picked, valid) 
-      } else {
-        picked <- point_picker(T, K, min_space)
-        break
-      }
+    valid <- valid[abs(valid - picked[k]) > min_space]
+    if (length(valid) < 1) {
+      return(point_picker(T, K, min_space))
     }
   }
+  if (length(valid) == 1) picked <- c(picked, valid)
+  else  picked <- c(picked, sample(valid, size = 1))
   return(picked[order(picked)])
 }
 
-hsmuce_simulation <- function(T, K, C, min_space) {
-  # sample changepoints
-  chp <- point_picker(T, K, min_space)
+hsmuce_simulation <- function(T, K, C, min_space, B_l=1, B_r=B_l) {
+  # sample change-points
+  chp <- point_picker(T-B_l-B_r, K, min_space) + B_l
   # sample variances
   s <- c(1, 2^runif(K, -2, 2))
   # generate means and signal
   mu <- numeric(K + 1)
-  y <- c()
   blks <- diff(c(1, chp, T+1))
-  for (k in 1:(K+1)) {
+  y <- rnorm(blks[1])
+  for (k in 1:K) {
     jump <- sqrt(C / min(blks[k+1] / s[k+1]^2, blks[k] / s[k]^2))
-    if (k < K+1) mu[k+1] <- mu[k] + sample(c(-1,1), 1) * jump
-    y <- c(y, rnorm(blks[k], mean = mu[k], sd = s[k]))
+    mu[k+1] <- mu[k] + sample(c(-1,1), 1) * jump
+    y <- c(y, rnorm(blks[k+1], mean = mu[k+1], sd = s[k+1]))
   }
+  rep(mu, blks)
   return(list(y = y, 
               mu = mu, 
               s = s, 
               changepoints = chp, 
               mean_signal = rep(mu, blks), 
-              var_signal = rep(s^2, blks))
+              var_signal = rep(s^2, blks)
+              )
          )
 }
 
@@ -77,3 +72,4 @@ hausdorff <- function(true_cp, est_cp, T) {
   if (length(est_cp) == 0) return(T)
   else return(max(sapply(true_cp, function(x) min(abs(x - est_cp)))))
 }
+

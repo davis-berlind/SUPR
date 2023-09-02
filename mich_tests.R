@@ -1,21 +1,35 @@
-
+L = 3; J = 0; K=3; fit.intercept = TRUE; fit.scale = TRUE;
+tol = 1e-5; B_l = 1; B_r = B_l; verbose = FALSE;
+tau_j = 0.1; tau_l = tau_j; 
+u_j = 1e-3; v_j = u_j; u_k = u_j; v_k = v_j;
+theta = NULL; pi = NULL; omega = NULL;
 # Data Generation
 
 set.seed(10)
 
 T <- 800
 
-beta <- rep(0, T)
-beta[201:400] <- 3
-beta[401:600] <- -2
-beta[601:T] <- -4
+mu <- rep(0, T)
+mu[201:400] <- 3
+mu[401:600] <- -2
+mu[601:T] <- -4
 
-lambda <- rep(3, T)
+lambda <- rep(1, T)
 lambda[201:400] <- 10
 lambda[401:600] <- .5
 lambda[601:T] <- 2
 
-y <- rnorm(T, mean = beta, sd = sqrt(1 / lambda))
+y <- rnorm(T, mean = mu, sd = sqrt(1 / lambda))
+tmp=mich(y, J = 3, verbose = TRUE, fit.intercept = FALSE, fit.scale = FALSE)
+tmp=mich(y, K = 3, L = 3, verbose = TRUE, fit.intercept = TRUE, fit.scale = TRUE)
+
+tmp=mich(dat$y, J=4, L=4, K=4, verbose = TRUE, fit.intercept = FALSE, fit.scale = FALSE, conv_crit = "ELBO", tol = 1e-3)
+plot(dat$y)
+abline(v=apply(tmp$mean.scale.model$probs,2,which.max),col="blue")
+abline(v=apply(tmp$mean.model$probs,2,which.max),col="red",lty=2)
+abline(v=apply(tmp$scale.model$probs,2,which.max),col="orange",lty=3)
+lines(tmp$mu)
+plot(tmp$elbo)
 
 diags <- c()
 for(i in 1:10) {

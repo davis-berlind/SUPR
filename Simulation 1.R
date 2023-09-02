@@ -33,129 +33,96 @@ results <- foreach(i = 1:N, .combine = rbind, .verbose = TRUE) %dopar% {
     cp_data <- hsmuce_simulation(T, L, 200, min_space)
     true_cp <- cp_data$changepoints
     
-    #### MICH I ####
+    #### MICH(0,L,K) ####
     local_rate <- round(T / sqrt(T * log(T))) 
-    time <- system.time({fit <- mich_i(cp_data$y, L = local_rate , K = local_rate, 
-                                       tol = 0.001, fit.intercept = FALSE)})[3] # fit model and time process
-    mean_mse <- mean((fit$beta - cp_data$mean_signal)^2)
+    time <- system.time({fit <- mich(cp_data$y, L = local_rate , K = local_rate, 
+                                     fit.intercept = FALSE, fit.scale = FALSE, tol = tol)})[3] # fit model and time process
+    if (fit$converged == FALSE) {
+      time <- system.time({fit <- mich(cp_data$y, L = local_rate , K = local_rate, 
+                                       fit.intercept = FALSE, fit.scale = FALSE, tol = tol, max_iter = 1e5)})[3] 
+    }
+    mean_mse <- mean((fit$mu - cp_data$mean_signal)^2)
     var_mse <- mean((1/fit$lambda - cp_data$var_signal)^2)
     
     # MICH CS
-    cs <- cred_set_prisca(fit$pi, max_length = T %/% 4)
+    cs <- mich_sets(fit$mean.model$probs, max_length = T %/% 4)
     L_est <- length(cs) 
-    est_cp <- unique(apply(fit$pi, 2, which.max)) # extract MAP change-point locations
+    est_cp <- unique(apply(fit$mean.model$probs, 2, which.max)) # extract MAP change-point locations
     est_cp <- est_cp[est_cp %in% unlist(cs)] # only keep points in extracted CS
     detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
     n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(cs, function(x) any(detected %in% x)))) # number of CS that cover a detected change-point
+    n_covered <- ifelse(L_est == 0, 0, sum(detected %in% unlist(cs))) # number of CS that cover a detected change-point
     avg_len <- ifelse(L_est == 0, NA, mean(sapply(cs, function(x) length(x)))) # average CS length
-    result[nrow(result) + 1,"method"] <- "MICH I"
-    result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
-                                 hausdorff(true_cp, est_cp, T), fpsle(true_cp, est_cp, T), fnsle(true_cp, est_cp, T))
-    # BLiP CS
-    blip_groups <- suppressWarnings(susie_groups(t(fit$pi), X = NULL, q = 0.1)) # generate blip candidate groups
-    blip_sets <- BLiP(cand_groups = blip_groups) # generate blip sets
-    L_est <- length(blip_sets) 
-    est_cp <- unique(apply(fit$pi, 2, which.max)) # extract MAP change-point locations
-    est_cp <- est_cp[est_cp %in% unlist(sapply(blip_sets, function(x) x$group))] # only keep points in extracted CS
-    detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
-    n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(blip_sets, function(x) any(detected %in% x$group)))) # number of CS that cover a detected change-point
-    avg_len <- ifelse(L_est == 0, NA, mean(sapply(blip_sets, function(x) length(x$group)))) # average CS length
-    result[nrow(result) + 1,"method"] <- "MICH I + BLiP"
+    result[nrow(result) + 1,"method"] <- "MICH(0,L,K)"
     result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
                                  hausdorff(true_cp, est_cp, T), fpsle(true_cp, est_cp, T), fnsle(true_cp, est_cp, T))
     
-    #### MICH I oracle ####
-    time <- system.time({fit <- mich_i(cp_data$y, L = L, K = L, tol = 0.001, fit.intercept = FALSE)})[3] # fit model and time process
-    mean_mse <- mean((fit$beta - cp_data$mean_signal)^2)
+    #### MICH(0,L,K) Oracle ####
+    time <- system.time({fit <- mich(cp_data$y, L = L , K = L, 
+                                     fit.intercept = FALSE, fit.scale = FALSE, tol = tol)})[3] # fit model and time process    
+    if (fit$converged == FALSE) {
+      system.time({fit <- mich(cp_data$y, L = L , K = L, 
+                               fit.intercept = FALSE, fit.scale = FALSE, tol = tol, max_iter = 1e5)})[3]
+    }
+    mean_mse <- mean((fit$mu - cp_data$mean_signal)^2)
     var_mse <- mean((1/fit$lambda - cp_data$var_signal)^2)
     
     # MICH CS
-    cs <- cred_set_prisca(fit$pi, max_length = T %/% 4)
+    cs <- mich_sets(fit$mean.model$probs, max_length = T %/% 4)
     L_est <- length(cs) 
-    est_cp <- unique(apply(fit$pi, 2, which.max)) # extract MAP change-point locations
+    est_cp <- unique(apply(fit$mean.model$probs, 2, which.max)) # extract MAP change-point locations
     est_cp <- est_cp[est_cp %in% unlist(cs)] # only keep points in extracted CS
     detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
     n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(cs, function(x) any(detected %in% x)))) # number of CS that cover a detected change-point
+    n_covered <- ifelse(L_est == 0, 0, sum(detected %in% unlist(cs))) # number of CS that cover a detected change-point
     avg_len <- ifelse(L_est == 0, NA, mean(sapply(cs, function(x) length(x)))) # average CS length
-    result[nrow(result) + 1,"method"] <- "MICH I Oracle"
-    result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
-                                 hausdorff(true_cp, est_cp, T), fpsle(true_cp, est_cp, T), fnsle(true_cp, est_cp, T))
-    # BLiP CS
-    blip_groups <- suppressWarnings(susie_groups(t(fit$pi), X = NULL, q = 0.1)) # generate blip candidate groups
-    blip_sets <- BLiP(cand_groups = blip_groups) # generate blip sets
-    L_est <- length(blip_sets) 
-    est_cp <- unique(apply(fit$pi, 2, which.max)) # extract MAP change-point locations
-    est_cp <- est_cp[est_cp %in% unlist(sapply(blip_sets, function(x) x$group))] # only keep points in extracted CS
-    detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
-    n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(blip_sets, function(x) any(detected %in% x$group)))) # number of CS that cover a detected change-point
-    avg_len <- ifelse(L_est == 0, NA, mean(sapply(blip_sets, function(x) length(x$group)))) # average CS length
-    result[nrow(result) + 1,"method"] <- "MICH I + BLiP Oracle"
+    result[nrow(result) + 1,"method"] <- "MICH(0,L,K) Oracle"
     result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
                                  hausdorff(true_cp, est_cp, T), fpsle(true_cp, est_cp, T), fnsle(true_cp, est_cp, T))
     
-    #### MICH II ####
-    time <- system.time({fit <- mich_ii(cp_data$y, L = local_rate, tol = 0.001, fit.intercept = FALSE)})[3] # fit model and time process
-    mean_mse <- mean((fit$beta - cp_data$mean_signal)^2)
+    #### MICH(J,0,0) ####
+    time <- system.time({fit <- mich(cp_data$y, J = local_rate, 
+                                     fit.intercept = FALSE, fit.scale = FALSE, tol = tol)})[3] # fit model and time process    
+    if (fit$converged == FALSE) {
+      time <- system.time({fit <- mich(cp_data$y, J = local_rate, 
+                                       fit.intercept = FALSE, fit.scale = FALSE, tol = tol, max_iter = 1e5)})[3] 
+    }
+    mean_mse <- mean((fit$mu - cp_data$mean_signal)^2)
     var_mse <- mean((1/fit$lambda - cp_data$var_signal)^2)
     
     # MICH CS
-    cs <- cred_set_prisca(fit$pi, max_length = T %/% 4)
+    cs <- mich_sets(fit$mean.scale.model$probs, max_length = T %/% 4)
     L_est <- length(cs) 
-    est_cp <- unique(apply(fit$pi, 2, which.max)) # extract MAP change-point locations
+    est_cp <- unique(apply(fit$mean.scale.model$probs, 2, which.max)) # extract MAP change-point locations
     est_cp <- est_cp[est_cp %in% unlist(cs)] # only keep points in extracted CS
     detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
     n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(cs, function(x) any(detected %in% x)))) # number of CS that cover a detected change-point
+    n_covered <- ifelse(L_est == 0, 0, sum(detected %in% unlist(cs))) # number of CS that cover a detected change-point
     avg_len <- ifelse(L_est == 0, NA, mean(sapply(cs, function(x) length(x)))) # average CS length
-    result[nrow(result) + 1,"method"] <- "MICH II"
-    result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
-                                 hausdorff(true_cp, est_cp, T), fpsle(true_cp, est_cp, T), fnsle(true_cp, est_cp, T))
-    # BLiP CS
-    blip_groups <- suppressWarnings(susie_groups(t(fit$pi), X = NULL, q = 0.1)) # generate blip candidate groups
-    blip_sets <- BLiP(cand_groups = blip_groups) # generate blip sets
-    L_est <- length(blip_sets) 
-    est_cp <- unique(apply(fit$pi, 2, which.max)) # extract MAP change-point locations
-    est_cp <- est_cp[est_cp %in% unlist(sapply(blip_sets, function(x) x$group))] # only keep points in extracted CS
-    detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
-    n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(blip_sets, function(x) any(detected %in% x$group)))) # number of CS that cover a detected change-point
-    avg_len <- ifelse(L_est == 0, NA, mean(sapply(blip_sets, function(x) length(x$group)))) # average CS length
-    result[nrow(result) + 1,"method"] <- "MICH II + BLiP"
+    result[nrow(result) + 1,"method"] <- "MICH(J,0,0)"
     result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
                                  hausdorff(true_cp, est_cp, T), fpsle(true_cp, est_cp, T), fnsle(true_cp, est_cp, T))
     
-    #### MICH II oracle ####
-    time <- system.time({fit <- mich_ii(cp_data$y, L = L, tol = 0.001, fit.intercept = FALSE)})[3] # fit model and time process
-    mean_mse <- mean((fit$beta - cp_data$mean_signal)^2)
+    #### MICH(J,0,0) Oracle ####
+    time <- system.time({fit <- mich(cp_data$y, J = L, 
+                                     fit.intercept = FALSE, fit.scale = FALSE, tol = tol)})[3] # fit model and time process 
+    if (fit$converged == FALSE) {
+      time <- system.time({fit <- mich(cp_data$y, J = L, 
+                                       fit.intercept = FALSE, fit.scale = FALSE, tol = tol, max_iter = 1e5)})[3]
+    }
+    mean_mse <- mean((fit$mu - cp_data$mean_signal)^2)
     var_mse <- mean((1/fit$lambda - cp_data$var_signal)^2)
     
     # MICH CS
-    cs <- cred_set_prisca(fit$pi, max_length = T %/% 4)
+    cs <- mich_sets(fit$mean.scale.model$probs, max_length = T %/% 4)
     L_est <- length(cs) 
-    est_cp <- unique(apply(fit$pi, 2, which.max)) # extract MAP change-point locations
+    est_cp <- unique(apply(fit$mean.scale.model$probs, 2, which.max)) # extract MAP change-point locations
     est_cp <- est_cp[est_cp %in% unlist(cs)] # only keep points in extracted CS
     detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
     n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(cs, function(x) any(detected %in% x)))) # number of CS that cover a detected change-point
+    n_covered <- ifelse(L_est == 0, 0, sum(detected %in% unlist(cs))) # number of CS that cover a detected change-point
     avg_len <- ifelse(L_est == 0, NA, mean(sapply(cs, function(x) length(x)))) # average CS length
-    result[nrow(result) + 1,"method"] <- "MICH II Oracle"
-    result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
-                                 hausdorff(true_cp, est_cp, T), fpsle(true_cp, est_cp, T), fnsle(true_cp, est_cp, T))
-    # BLiP CS
-    blip_groups <- suppressWarnings(susie_groups(t(fit$pi), X = NULL, q = 0.1)) # generate blip candidate groups
-    blip_sets <- BLiP(cand_groups = blip_groups) # generate blip sets
-    L_est <- length(blip_sets) 
-    est_cp <- unique(apply(fit$pi, 2, which.max)) # extract MAP change-point locations
-    est_cp <- est_cp[est_cp %in% unlist(sapply(blip_sets, function(x) x$group))] # only keep points in extracted CS
-    detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
-    n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(blip_sets, function(x) any(detected %in% x$group)))) # number of CS that cover a detected change-point
-    avg_len <- ifelse(L_est == 0, NA, mean(sapply(blip_sets, function(x) length(x$group)))) # average CS length
-    result[nrow(result) + 1,"method"] <- "MICH II + BLiP Oracle"
+    result[nrow(result) + 1,"method"] <- "MICH(J,0,0) Oracle"
     result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
                                  hausdorff(true_cp, est_cp, T), fpsle(true_cp, est_cp, T), fnsle(true_cp, est_cp, T))
     
@@ -166,10 +133,14 @@ results <- foreach(i = 1:N, .combine = rbind, .verbose = TRUE) %dopar% {
     var_mse <-  mean((rep(hsmuce_var, diff(c(fit$leftEnd,T+1))) - cp_data$var_signal)^2)
     est_cp <- fit$leftEnd[-1]
     L_est <- length(est_cp)
-    cs <- lapply(1:L_est, function(i) (fit$leftEndLeftBound[i+1]-1):fit$leftEndRightBound[i+1])
+    if (L_est == 0) {
+      cs <- c()
+    } else {
+      cs <- lapply(1:L_est, function(i) (fit$leftEndLeftBound[i+1]-1):fit$leftEndRightBound[i+1])
+    }
     detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
     n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(cs, function(x) any(detected %in% x)))) # number of CS that cover a detected change-point
+    n_covered <- ifelse(L_est == 0, 0, sum(detected %in% unlist(cs))) # number of CS that cover a detected change-point
     avg_len <- ifelse(L_est == 0, NA, mean(sapply(cs, function(x) length(x)))) # average CS length
     result[nrow(result) + 1,"method"] <- "H-SMUCE"
     result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
@@ -195,10 +166,14 @@ results <- foreach(i = 1:N, .combine = rbind, .verbose = TRUE) %dopar% {
     vr <- sapply(1:(L_est + 1), function(i) var(cp_data$y[c(1, est_cp, T + 1)[i]:(c(1, est_cp, T + 1)[i+1]-1)]))
     mean_mse <- mean((rep(mn, diff(c(1, est_cp, T+1))) - cp_data$mean_signal)^2)
     var_mse <- mean((rep(vr, diff(c(1, est_cp, T+1))) - cp_data$var_signal)^2)
-    cs <- lapply(1:L_est, function(i) (fit$ci$CI$unif.left[i] + 1):(fit$ci$CI$unif.right[i] + 1))
+    if (L_est == 0) {
+      cs <- c()
+    } else {
+      cs <- lapply(1:L_est, function(i) (fit$ci$CI$unif.left[i] + 1):(fit$ci$CI$unif.right[i] + 1))
+    }
     detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
     n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(cs, function(x) any(detected %in% x)))) # number of CS that cover a detected change-point
+    n_covered <- ifelse(L_est == 0, 0, sum(detected %in% unlist(cs))) # number of CS that cover a detected change-point
     avg_len <- ifelse(L_est == 0, NA, mean(sapply(cs, function(x) length(x)))) # average CS length
     result[nrow(result) + 1,"method"] <- "MOSUM BU"
     result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
@@ -212,10 +187,14 @@ results <- foreach(i = 1:N, .combine = rbind, .verbose = TRUE) %dopar% {
     vr <- sapply(1:(L_est + 1), function(i) var(cp_data$y[c(1, est_cp, T + 1)[i]:(c(1, est_cp, T + 1)[i+1]-1)]))
     mean_mse <- mean((rep(mn, diff(c(1, est_cp, T+1))) - cp_data$mean_signal)^2)
     var_mse <- mean((rep(vr, diff(c(1, est_cp, T+1))) - cp_data$var_signal)^2)
-    cs <- lapply(1:L_est, function(i) (fit$ci$CI$unif.left[i] + 1):(fit$ci$CI$unif.right[i] + 1))
+    if (L_est == 0) {
+      cs <- c()
+    } else {
+      cs <- lapply(1:L_est, function(i) (fit$ci$CI$unif.left[i] + 1):(fit$ci$CI$unif.right[i] + 1))
+    }    
     detected <- true_cp[true_cp %in% unlist(lapply(est_cp, function(x) (x - window):(x + window)))] # detected true change-points
     n_detected <- length(detected)
-    n_covered <- ifelse(L_est == 0, 0, sum(sapply(cs, function(x) any(detected %in% x)))) # number of CS that cover a detected change-point
+    n_covered <- ifelse(L_est == 0, 0, sum(detected %in% unlist(cs))) # number of CS that cover a detected change-point
     avg_len <- ifelse(L_est == 0, NA, mean(sapply(cs, function(x) length(x)))) # average CS length
     result[nrow(result) + 1,"method"] <- "MOSUM LP"
     result[nrow(result),-1] <- c(T, L, min_space, time, L_est, n_detected, n_covered, avg_len, mean_mse, var_mse,
@@ -234,28 +213,34 @@ results <- foreach(i = 1:N, .combine = rbind, .verbose = TRUE) %dopar% {
   result
 }
 
-saveRDS(results, "Desktop/results.rds")
+saveRDS(results, "~/Desktop/results.rds")
 
 results <- readRDS("Desktop/results.rds")
-i=1
 
+
+i=10
 results %>% 
   filter(T == settings$T[i], L == settings$L[i], min_space == settings$min_space[i]) %>% 
   group_by(method, T, L, min_space) %>% 
   summarize("|L - L_hat|" = mean(abs(L - L_est)),
-            "<= -2" = mean((L - L_est) <= -2),
-            "= -1" = mean((L - L_est) == -1),
-            "= 0" = mean((L - L_est) == 0),
-            "= 1" = mean((L - L_est) == 1),
-            ">= 2" = mean((L - L_est) >= 2),
+            #"<= -2" = mean((L - L_est) <= -2),
+            #"= -1" = mean((L - L_est) == -1),
+            #"= 0" = mean((L - L_est) == 0),
+            #"= 1" = mean((L - L_est) == 1),
+            #">= 2" = mean((L - L_est) >= 2),
             ci_length = sum(L_est * avg_len, na.rm = TRUE) / sum(L_est),
             coverage = sum(n_covered, na.rm = TRUE) / sum(n_detected, na.rm = TRUE),
-            hausdorff = mean(hausdorff),
-            fpsle = mean(fpsle),
-            fnsle = mean(fpsle),
-            mean_mse = mean(mean_mse),
-            var_mse = mean(var_mse),
-            time = mean(time))
+            hausdorff = mean(hausdorff, na.rm = TRUE),
+            fpsle = mean(fpsle, na.rm = TRUE),
+            fnsle = mean(fnsle, na.rm = TRUE),
+            #mean_mse = mean(mean_mse, na.rm = TRUE),
+            #var_mse = mean(var_mse, na.rm = TRUE),
+            time = mean(time, na.rm = TRUE)) %>% 
+  mutate_if(is.numeric, ~format(round(.,3), nsmall = 3)) %>% 
+  arrange(T, L, min_space) %>% 
+  write.csv("~/Desktop/results.csv", row.names = FALSE)
+  
+settings[i,]
 
             
             
