@@ -1,6 +1,6 @@
 #### helper functions #### 
 
-revcumsum <- function(x){
+revcumsumR <- function(x){
   T <- length(x)
   s <- c(0, cumsum(x[-T]))
   return(x[T] + s[T] - s)
