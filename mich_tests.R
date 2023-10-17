@@ -1,8 +1,8 @@
-L = 3; J = 0; K=3; fit.intercept = TRUE; fit.scale = TRUE;
-tol = 1e-5; B_l = 1; B_r = B_l; verbose = FALSE;
+L = 0; J = 2; K=0; fit.intercept = TRUE; fit.scale = TRUE;
+tol = 1e-5; B_l = 1; B_r = B_l; verbose = TRUE;
 tau_j = 0.1; tau_l = tau_j; 
 u_j = 1e-3; v_j = u_j; u_k = u_j; v_k = v_j;
-theta = NULL; pi = NULL; omega = NULL;
+p_l = NULL; pi_j = NULL; pi_k = NULL;
 # Data Generation
 
 set.seed(10)

@@ -1,4 +1,5 @@
 #include <Rcpp.h>
+#include <Rmath.h>
 using namespace Rcpp;
 
 // [[Rcpp::export]]
@@ -10,13 +11,9 @@ NumericVector revcumsum(NumericVector x) {
 }
 
 // [[Rcpp::export]]
-NumericVector test(NumericVector y, int B_l) {
-  NumericVector y_0(B_l);
-  if (B_l > 0) {
-    y_0 = y[Rcpp::Range(0, B_l - 1)];
-    y.erase(0,B_l);
-  }
-  return y;
+double test(NumericVector y_0) {
+  double out = Rcpp::sum(y_0);
+  return out;
 }
 
 // You can include R code blocks in C++ files processed with sourceCpp
@@ -25,5 +22,5 @@ NumericVector test(NumericVector y, int B_l) {
 //
 
 /*** R
-test(1:10, 0)
+test(numeric(0)) 
 */

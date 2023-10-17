@@ -218,16 +218,16 @@ saveRDS(results, "~/Desktop/results.rds")
 results <- readRDS("Desktop/results.rds")
 
 
-i=10
+i=1
 results %>% 
   filter(T == settings$T[i], L == settings$L[i], min_space == settings$min_space[i]) %>% 
   group_by(method, T, L, min_space) %>% 
   summarize("|L - L_hat|" = mean(abs(L - L_est)),
-            #"<= -2" = mean((L - L_est) <= -2),
-            #"= -1" = mean((L - L_est) == -1),
-            #"= 0" = mean((L - L_est) == 0),
-            #"= 1" = mean((L - L_est) == 1),
-            #">= 2" = mean((L - L_est) >= 2),
+            "<= -2" = mean((L - L_est) <= -2),
+            "= -1" = mean((L - L_est) == -1),
+            "= 0" = mean((L - L_est) == 0),
+            "= 1" = mean((L - L_est) == 1),
+            ">= 2" = mean((L - L_est) >= 2),
             ci_length = sum(L_est * avg_len, na.rm = TRUE) / sum(L_est),
             coverage = sum(n_covered, na.rm = TRUE) / sum(n_detected, na.rm = TRUE),
             hausdorff = mean(hausdorff, na.rm = TRUE),

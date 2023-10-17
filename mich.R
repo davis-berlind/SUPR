@@ -1,11 +1,18 @@
-mich <- function(y, J = 0, L = 0, K = 0, fit.intercept = TRUE, fit.scale = TRUE,
-                 tol = 1e-5, B_l = 1, B_r = B_l, verbose = FALSE, max_iter = 10000,
-                 conv_crit = "ELBO",
-                 tau_j = 1e-3, u_j = 1e-3, v_j = u_j, pi_j = NULL,
-                 tau_l = tau_j, pi_l = NULL,
-                 u_k = u_j, v_k = v_j, pi_k = NULL) {
+mich <- function(y, J = 0, L = 0, K = 0, fit_intercept = FALSE, fit_scale = FALSE,
+                 tol = 1e-5, B_l = 1, B_r = 1, verbose = FALSE, max_iter = 10000,
+                 tau_j = 1e-3, u_j = 1e-3, v_j = 1e-3, pi_j = NULL,
+                 tau_l = 1e-3, pi_l = NULL,
+                 u_k = 1e-3, v_k = 1e-3, pi_k = NULL) {
   
+  #### checking parameters ####
   if (!is.numeric(y) | !is.vector(y)) stop("y must be a numeric vector.")
+
+  B_l <- component_check(B_l)
+  B_r <- component_check(B_r)
+  if (is.null(B_l) | is.null(B_r)) stop("B_l and B_r must be integers >= 0")
+
+  # calculate length of sequence
+  T = length(y) - B_r - B_l
   
   # extract y in (1-B_l):1
   y_0 <- c()
@@ -14,329 +21,491 @@ mich <- function(y, J = 0, L = 0, K = 0, fit.intercept = TRUE, fit.scale = TRUE,
     y <- y[-c(1:B_l)]
   }
   
-  T <- length(y) - B_r
-  tail <- (T+1):(T+B_r)
+  max_iter <- component_check(max_iter)
+  if (is.null(max_iter)) stop("max_iter must be a positive integer or Inf.")
   
-  # checking that priors are proper
-  if (J > 0) {
-    tau_j <- prior_check(tau_j, J)
-    if (is.null(tau_j)) stop("tau_j must either be a positive number or length J vector of positive number.")
-    u_j <- prior_check(u_j, J)
-    if (is.null(u_j)) stop("u_j must either be a positive number or length J vector of positive number.")
-    v_j <- prior_check(v_j, J)
-    if (is.null(v_j)) stop("v_j must either be a positive number or length J vector of positive numbers.") 
+  if (!is.logical(fit_intercept) | !is.logical(fit_scale)) { 
+    stop("fit_intercept and fit_scale must be either TRUE or FALSE.")
   }
-  if (L > 0) {
-    tau_l <- prior_check(tau_l, L)
-    if (is.null(tau_l)) stop("tau_l must either be a positive number or length L vector of positive number.")
-  }
-  if (K > 0) { 
-    u_k <- prior_check(u_k, K)
-    if (is.null(u_k)) stop("u_k must either be a positive number or length K vector of positive number.")
-    v_k <- prior_check(v_k, K)
-    if (is.null(v_k)) stop("v_K must either be a positive number or length K vector of positive numbers.") 
-  }
+  
+  if (!is.logical(verbose)) stop("verbose must be either TRUE or FALSE.")
+
+  J <- component_check(J)  
+  if (is.null(J)) stop("J must be an integer >= 0 or set to 'auto'.")
+  J_auto <- (J == "auto")
+  if (J_auto) J = 0 
+ 
+  L <- component_check(L)  
+  if (is.null(L)) stop("L must be an integer >= 0 or set to 'auto'.")
+  L_auto <- (L == "auto")
+  if (L_auto) L = 0 
+  
+  K <- component_check(K)  
+  if (is.null(K)) stop("K must be an integer >= 0 or set to 'auto'.")
+  K_auto <- (K == "auto")
+  if (K_auto) K = 0 
+  
+  ##### checking that priors are proper ####
+  # J components
+  tau_j <- prior_check(tau_j, J)
+  if (is.null(tau_j)) stop("tau_j must either be a positive number or length J vector of positive number.")
+  u_j <- prior_check(u_j, J)
+  if (is.null(u_j)) stop("u_j must either be a positive number or length J vector of positive number.")
+  v_j <- prior_check(v_j, J)
+  if (is.null(v_j)) stop("v_j must either be a positive number or length J vector of positive numbers.") 
+  
+  # L components
+  tau_l <- prior_check(tau_l, L)
+  if (is.null(tau_l)) stop("tau_l must either be a positive number or length L vector of positive number.")
+  
+  # K components
+  u_k <- prior_check(u_k, K)
+  if (is.null(u_k)) stop("u_k must either be a positive number or length K vector of positive number.")
+  v_k <- prior_check(v_k, K)
+  if (is.null(v_k)) stop("v_K must either be a positive number or length K vector of positive numbers.") 
   
   # uniform prior on change point locations if not specified
-  if(J > 0) {
-    pi_j <- prob_check(pi_j, J, T)
-    if(is.null(pi_j)) stop("If given, pi_j must be a T x J matrix with columns that sum to one.")
-  }
-  if(L > 0) {
-    pi_l <- prob_check(pi_l, L, T)
-    if(is.null(pi_l)) stop("If given, pi_l must be a T x L matrix with columns that sum to one.")
-  }
-  if(K > 0) {
-    pi_k <- prob_check(pi_k, K, T)
-    if(is.null(pi_k)) stop("If given, pi_k must be a T x K matrix with columns that sum to one.")
-  }
+  pi_j <- prob_check(pi_j, J, T)
+  if(is.null(pi_j)) stop("If given, pi_j must be a T x J matrix with columns that sum to one.")
+  pi_l <- prob_check(pi_l, L, T)
+  if(is.null(pi_l)) stop("If given, pi_l must be a T x L matrix with columns that sum to one.")
+  pi_k <- prob_check(pi_k, K, T)
+  if(is.null(pi_k)) stop("If given, pi_k must be a T x K matrix with columns that sum to one.")
   
-  # initialize parameter vector
-  if (conv_crit == "l2") params <- c()
-  
-  # initializing posterior parameters
-  if (J > 0) {
-    pi_bar_j <- matrix(1 / T, nrow = T, ncol = J)
-    b_bar_j <- matrix(0, nrow = T, ncol = J)
-    tau_bar_j <- matrix(1, nrow = T, ncol = J)
-    mu_lambda_j <- matrix(0, nrow = T + B_r, ncol = J)
-    mu2_lambda_j <- matrix(0, nrow = T + B_r, ncol = J)
-    u_bar_j <- matrix(u_j, nrow = T, ncol = J, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
-    v_bar_j <- u_bar_j
-    lambda_bar_j <- matrix(1, nrow = T + B_r, ncol = J)
-    if (conv_crit == "l2") params <- c(params, pi_bar_j, b_bar_j, tau_bar_j, v_bar_j)
-  }
-  if (L > 0) {
-    pi_bar_l <- matrix(1 / T, nrow = T, ncol = L)
-    b_bar_l <- matrix(0, nrow = T, ncol = L)
-    tau_bar_l <- matrix(1, nrow = T, ncol = L)
-    mu_bar_l <- matrix(0, nrow = T + B_r, ncol = L)
-    mu2_bar_l <- matrix(0, nrow = T + B_r, ncol = L)
-    if (conv_crit == "l2") params <- c(params, pi_bar_l, b_bar_l, tau_bar_l)
-  }
-  if (K > 0) {
-    pi_bar_k <- matrix(1 / T, nrow = T, ncol = K)
-    u_bar_k <- matrix(u_k, nrow = T, ncol = K, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
-    v_bar_k <- u_bar_k
-    lambda_bar_k <- matrix(1, nrow = T + B_r, ncol = K)
-    if (conv_crit == "l2") params <- c(params, pi_bar_k, v_bar_k)
-  }
-  
-  # quick fit to initialize mu_0 and lambda_0
-  # if (fit.intercept | fit.scale) {
-  #   init_fit <- mich(c(y_0,y), 
-  #                    ifelse(J > 0, J+1, 0), 
-  #                    ifelse(L > 0, L+1, 0), 
-  #                    ifelse(K > 0, K+1, 0),
-  #                    fit.intercept = FALSE, fit.scale = FALSE,
-  #                    B_l = 0, B_r = B_r, max_iter = 5)
-  # }
- 
-  # initialize mu_0
-  if (fit.intercept) {
-    #mu_0 <- init_fit$mu[1]
-    if (B_l > 0) mu_0 <- mean(y_0)
-    else mu_0 <- y[1]
-    if (conv_crit == "l2") params <- c(params, mu_0)
-  } else mu_0 <- 0
-  
-  # initialize lambda_0 
-  if (fit.scale) {
-    #lambda_0 <- init_fit$lambda[1]
-    if (B_l == 1) lambda_0 <- 1
-    else if (B_l > 1) lambda_0 <- 1 / var(y_0)
-    else lambda_0 <- 1 / var(y[1:2])
-    if (conv_crit == "l2") params <- c(params, lambda_0)
-  } else lambda_0 <- 1
+  #### initializing posterior parameters ####
+  # J components
+  pi_bar_j <- matrix(1 / T, nrow = T, ncol = J)
+  b_bar_j <- matrix(0.0, nrow = T, ncol = J)
+  tau_bar_j <- matrix(1.0, nrow = T, ncol = J)
+  mu_lambda_j <- matrix(0.0, nrow = T + B_r, ncol = J)
+  mu2_lambda_j <- matrix(0.0, nrow = T + B_r, ncol = J)
+  u_bar_j <- matrix(u_j, nrow = T, ncol = J, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
+  v_bar_j <- matrix(v_j, nrow = T, ncol = J, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
+  lambda_bar_j <- matrix(1.0, nrow = T + B_r, ncol = J)
 
-  # initialize residual and scale vector
-  r_tilde <- y - mu_0
-  lambda_bar <- rep(lambda_0, T + B_r)
+  # L components
+  pi_bar_l <- matrix(1 / T, nrow = T, ncol = L)
+  b_bar_l <- matrix(0.0, nrow = T, ncol = L)
+  tau_bar_l <- matrix(1.0, nrow = T, ncol = L)
+  mu_bar_l <- matrix(0.0, nrow = T + B_r, ncol = L)
+  mu2_bar_l <- matrix(0.0, nrow = T + B_r, ncol = L)
   
-  # initialize correction term
-  delta <- rep(0, T + B_r)
+  # K components
+  pi_bar_k <- matrix(1 / T, nrow = T, ncol = K)
+  u_bar_k <- matrix(u_k, nrow = T, ncol = K, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
+  v_bar_k <-  matrix(v_k, nrow = T, ncol = K, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
+  lambda_bar_k <- matrix(1.0, nrow = T + B_r, ncol = K)
   
-  # initialize ELBO
-  elbo <- -Inf
-  elbo_track <- rep(elbo, max_iter + 1)
+  #### initialize mu_0 ####
+  if (fit_intercept) {
+    if (B_l >= 5) mu_0 <- mean(y_0)
+    else mu_0 <- mean(c(y_0, y[1:(5-B_l)]))
+  } else mu_0 <- 0.0
   
-  # VB algorithm 
-  for (iter in 1:max_iter) {
-    if (conv_crit == "l2") new_params <- c()
-    
-    # updating q(b_j, s_j, gamma_j)
-    if (J > 0) {
-      for (j in 1:J) {
-        # deleting j^{th} component from residual terms
-        r_tilde <- r_tilde + mu_lambda_j[,j] / lambda_bar_j[,j]
-        lambda_bar <- lambda_bar / lambda_bar_j[,j]
-        delta <- delta - mu2_lambda_j[,j] / lambda_bar_j[,j] + (mu_lambda_j[,j] / lambda_bar_j[,j])^2
+  #### initialize lambda_0 ####
+  if (fit_scale) {
+    if (B_l >= 5) lambda_0 <- 1 / var(y_0)
+    else lambda_0 <- 1 / var(c(y_0, y[1:(5-B_l)]))
+  } else lambda_0 <- 1.0
+  
+  #### fit model ####
+  fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                  B_l, B_r, fit_intercept, fit_scale, 
+                  max_iter, (verbose & !any(J_auto, K_auto, L_auto)), tol, 
+                  tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                  mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                  tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                  mu_bar_l, mu2_bar_l,
+                  u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                  lambda_bar_k)
+  
+  #### auto procedure with single component ####
+  if (sum(J_auto, L_auto, K_auto) == 1) {
+    while (TRUE) {
+      elbo <- fit$elbo[length(fit$elbo)] # current value of elbo
+      if (J_auto) {
+        if(verbose) print(paste0("J = ", J, ": ELBO = ", elbo))
         
-        # modified priors
-        delta_j <- c(0, cumsum(lambda_bar[1:(T-1)] * delta[1:(T-1)]))
-        v_tilde_j <- v_j[j] + 0.5 * ((lambda_bar[T] * delta[T] + delta_j[T]) - delta_j)
-        if (B_r > 0) v_tilde_j <- v_tilde_j + 0.5 * sum(lambda_bar[tail] * delta[tail])
-        log_pi_tilde_j <- log(pi_j[,j]) - 0.5 * delta_j
-        pi_tilde_j <- prop.table(exp(log_pi_tilde_j - max(log_pi_tilde_j)))
+        # increment dimension of parameters
+        J <- J + 1 
+        tau_j <- c(tau_j, 0.001); u_j <- c(u_j, 0.001); v_j <- c(v_j, 0.001);
+        pi_j <- cbind(1 / T, pi_j)
+        pi_bar_j <- cbind(1 / T, pi_bar_j)
+        b_bar_j <- cbind(0.0, b_bar_j)
+        tau_bar_j <- cbind(1.0, tau_bar_j)
+        mu_lambda_j <- cbind(0.0, mu_lambda_j)
+        mu2_lambda_j <- cbind(0.0, mu2_lambda_j)
+        u_bar_j <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, u_bar_j) 
+        v_bar_j <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, v_bar_j)
+        lambda_bar_j <- cbind(1.0, lambda_bar_j)
         
-        # fit single smscp model on modified partial residual
-        smscp_fit <- smscp(r_tilde, lambda_bar,  tau_j[j], u_j[j], v_tilde_j, pi_tilde_j, B_r) 
+        # fit new model 
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
         
-        # store posterior parameters
-        b_bar_j[,j] <- smscp_fit$mu
-        tau_bar_j[,j] <- smscp_fit$tau
-        v_bar_j[,j] <- smscp_fit$v
-        pi_bar_j[,j] <- smscp_fit$pi
-        
-        # update j^{th} mean and scale parameters
-        mu_lambda_j[1:T,j] <- cumsum(b_bar_j[,j] * (u_bar_j[,j] / v_bar_j[,j]) * pi_bar_j[,j])
-        mu2_lambda_j[1:T,j] <- cumsum((b_bar_j[,j]^2 * (u_bar_j[,j] / v_bar_j[,j]) + 1 / tau_bar_j[,j]) * pi_bar_j[,j])
-        lambda_bar_j[1:T,j] <- lambda_bar_fn(u_bar_j[,j], v_bar_j[,j], pi_bar_j[,j])
-        if (B_r > 0) {
-          mu_lambda_j[tail,j] <- mu_lambda_j[T,j]
-          mu2_lambda_j[tail,j] <- mu2_lambda_j[T,j]
-          lambda_bar_j[tail,j] <- lambda_bar_j[T,j]
+        # if elbo decreases return previous model
+        if (fit$elbo[length(fit$elbo)] < elbo) {
+          J <- J - 1
+          tau_j <- tau_j[-1]; u_j <- u_j[-1]; v_j <- v_j[-1];
+          pi_j <- pi_j[,-1, drop = FALSE]
+          pi_bar_j <- pi_bar_j[,-1, drop = FALSE]
+          b_bar_j <- b_bar_j[,-1, drop = FALSE]
+          tau_bar_j <- tau_bar_j[,-1, drop = FALSE]
+          mu_lambda_j <- mu_lambda_j[,-1, drop = FALSE]
+          mu2_lambda_j <- mu2_lambda_j[,-1, drop = FALSE]
+          u_bar_j <- u_bar_j[,-1, drop = FALSE]
+          v_bar_j <- v_bar_j[,-1, drop = FALSE]
+          lambda_bar_j <- lambda_bar_j[,-1, drop = FALSE]
+
+          fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                          B_l, B_r, fit_intercept, fit_scale, 
+                          max_iter, verbose = FALSE, tol, 
+                          tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                          mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                          tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                          mu_bar_l, mu2_bar_l,
+                          u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                          lambda_bar_k)
+          
+          break
         }
-
-        # update residual terms
-        r_tilde <- r_tilde - mu_lambda_j[,j] / lambda_bar_j[,j]
-        lambda_bar <- lambda_bar * lambda_bar_j[,j]
-        delta <- delta + mu2_lambda_j[,j] / lambda_bar_j[,j] - (mu_lambda_j[,j] / lambda_bar_j[,j])^2
       }
-      if (conv_crit == "l2") new_params <- c(new_params, pi_bar_j, b_bar_j, tau_bar_j, v_bar_j)
-    }
-
-    # updating q(b_l, gamma_l)
-    if (L > 0) {
-      for (l in 1:L) {
-        # deleting l^{th} component from residual terms
-        r_tilde <- r_tilde + mu_bar_l[,l]
-        delta <- delta - (mu2_bar_l[,l] - mu_bar_l[,l]^2)
+      
+      if (L_auto) {
+        if(verbose) print(paste0("L = ", L, ": ELBO = ", elbo))
         
-        # fit single smcp model on modified partial residual
-        smcp_fit <- smcp(r_tilde, lambda_bar, tau_l[l], pi_l[,l], B_r) 
+        # increment dimension of parameters
+        L <- L + 1
+        tau_l <- c(tau_l, 0.001)
+        pi_l <- cbind(1 / T, pi_l)
+        pi_bar_l <- cbind(1 / T, pi_bar_l)
+        b_bar_l <- cbind(0.0, b_bar_l)
+        tau_bar_l <- cbind(1.0, tau_bar_l)
+        mu_bar_l <- cbind(0.0, mu_bar_l)
+        mu2_bar_l <- cbind(0.0, mu2_bar_l)
         
-        # store posterior parameters
-        b_bar_l[,l] <- smcp_fit$mu
-        tau_bar_l[,l] <- smcp_fit$tau
-        pi_bar_l[,l] <- smcp_fit$pi
+        # fit new model 
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
         
-        # update l^{th} mean parameters
-        mu_bar_l[1:T,l] <- cumsum(b_bar_l[,l] * pi_bar_l[,l])
-        mu2_bar_l[1:T,l] <- cumsum((b_bar_l[,l]^2 + 1 / tau_bar_l[,l]) * pi_bar_l[,l])
-        if (B_r > 0) {
-          mu_bar_l[tail,l] <- mu_bar_l[T,l]
-          mu2_bar_l[tail,l] <- mu2_bar_l[T,l]
+        # if elbo decreases return previous model
+        if (fit$elbo[length(fit$elbo)] < elbo) {
+          L <- L - 1
+          tau_l <- tau_l[-1]
+          pi_l <- pi_l[,-1, drop = FALSE]
+          pi_bar_l <- pi_bar_l[,-1, drop = FALSE]
+          b_bar_l <- b_bar_l[,-1, drop = FALSE]
+          tau_bar_l <- tau_bar_l[,-1, drop = FALSE]
+          mu_bar_l <- mu_bar_l[,-1, drop = FALSE]
+          mu2_bar_l <- mu2_bar_l[,-1, drop = FALSE]
+          
+          fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                          B_l, B_r, fit_intercept, fit_scale, 
+                          max_iter, verbose = FALSE, tol, 
+                          tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                          mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                          tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                          mu_bar_l, mu2_bar_l,
+                          u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                          lambda_bar_k)
+          
+          break
         }
-        
-        # update residual terms
-        r_tilde <- r_tilde - mu_bar_l[,l]
-        delta <- delta + (mu2_bar_l[,l] - mu_bar_l[,l]^2)
       }
-      if (conv_crit == "l2") new_params <- c(new_params, pi_bar_l, b_bar_l, tau_bar_l)
-    }
-
-    # updating q(s_k, alpha_k)
-    if (K > 0) {
-      for (k in 1:K) {
-        # deleting k^{th} component from residual terms
-        lambda_bar <- lambda_bar / lambda_bar_k[,k]
+      
+      if (K_auto) {
+        if(verbose) print(paste0("K = ", K, ": ELBO = ", elbo))
         
-        # modified priors
-        delta_k <- c(0, cumsum(lambda_bar[1:(T-1)] * delta[1:(T-1)]))
-        v_tilde_k <- v_k[k] + 0.5 * ((lambda_bar[T] * delta[T] + delta_k[T]) - delta_k)
-        if (B_r > 0) v_tilde_k <- v_tilde_k + 0.5 * sum(lambda_bar[tail] * delta[tail])
-        log_pi_tilde_k <- log(pi_k[,k]) - 0.5 * delta_k
-        pi_tilde_k <- prop.table(exp(log_pi_tilde_k - max(log_pi_tilde_k)))
+        # increment dimension of parameters
+        K <- K + 1
+        u_k <- c(u_k, 0.001); v_k <- c(v_k, 0.001);
+        pi_k <- cbind(1 / T, pi_k)
+        pi_bar_k <- cbind(1 / T, pi_bar_k)
+        u_bar_k <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, u_bar_k) 
+        v_bar_k <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, v_bar_k)
+        lambda_bar_k <- cbind(1.0, lambda_bar_k)
         
-        # fit single sscp model on modified partial residual
-        sscp_fit <- sscp(r_tilde, lambda_bar, u_k[k], v_tilde_k, pi_tilde_k, B_r) 
+        # fit new model
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
         
-        # store posterior parameters
-        v_bar_k[,k] <- sscp_fit$v
-        pi_bar_k[,k] <- sscp_fit$pi
-        
-        # update j^{th} scale parameters
-        lambda_bar_k[1:T,k] <- lambda_bar_fn(u_bar_k[,k], v_bar_k[,k], pi_bar_k[,k])
-        if (B_r > 0) lambda_bar_k[tail,k] <- lambda_bar_k[T,k]
-        
-        # update residual terms
-        lambda_bar <- lambda_bar * lambda_bar_k[,k] # multiplying back lambda_k
+        # if elbo decreases return previous model
+        if (fit$elbo[length(fit$elbo)] < elbo) {
+          K <- K - 1
+          u_k <- u_k[-1]; v_k <- v_k[-1];
+          pi_k <- pi_k[,-1, drop = FALSE]
+          pi_bar_k <- pi_bar_k[,-1, drop = FALSE]
+          u_bar_k <- u_bar_k[,-1, drop = FALSE]
+          v_bar_k <- v_bar_k[,-1, drop = FALSE]
+          lambda_bar_k <- lambda_bar_k[,-1, drop = FALSE]
+          
+          fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                          B_l, B_r, fit_intercept, fit_scale, 
+                          max_iter, verbose = FALSE, tol, 
+                          tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                          mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                          tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                          mu_bar_l, mu2_bar_l,
+                          u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                          lambda_bar_k)
+          
+          break
+        }
       }
-      if (conv_crit == "l2") new_params <- c(new_params, pi_bar_k, v_bar_k)
     }
-    
-    # updating mu_0 and lambda_0
-    r_tilde <- r_tilde + mu_0 
-    lambda_bar <- lambda_bar / lambda_0
-    
-    if (fit.intercept) {
-      mu_0 <- (sum(y_0) + sum(lambda_bar * r_tilde)) / (B_l + sum(lambda_bar))
-      if (conv_crit == "l2") new_params <- c(new_params, mu_0)
-    }
-    if (fit.scale){
-      lambda_0 <- (T + B_l + B_r) / (sum((y_0 - mu_0)^2) + sum(lambda_bar * (r_tilde - mu_0)^2 + delta))
-      if (conv_crit == "l2") new_params <- c(new_params, lambda_0)
-    }
-    
-    r_tilde <- r_tilde - mu_0 
-    lambda_bar <- lambda_bar * lambda_0
-    
-    # calculate ELBO (up to constant)
-    elbo <- ((T + B_l + B_r) * log(lambda_0) - sum(lambda_0 * (y_0 - mu_0)^2) - sum(lambda_bar * (r_tilde^2 + delta))) / 2
-    if (J > 0) {
-      elbo <- elbo + sum((T+B_r):(1+B_r) * rowSums((digamma(u_bar_j) - log(v_bar_j)) * pi_bar_j)) / 2
-      
-      # need special care for log odds when prob is near zero
-      log_odds <- log(pi_j) - log(pi_bar_j)
-      log_odds[round(pi_bar_j, 10) == 0] <- 0
-      
-      # E[log p - log q]
-      # variance component
-      log_pq_var <- (u_j - u_bar_j) * digamma(u_bar_j)  + u_j * log(v_bar_j) + lgamma(u_bar_j) + u_bar_j * (1 - v_j / v_bar_j)
-      
-      # mean component
-      log_pq_mean <- tau_j * (b_bar_j^2 * u_bar_j / v_bar_j + 1 / tau_bar_j) + log(tau_bar_j)
-      
-      log_pq <- log_odds - log_pq_mean / 2 + log_pq_var
-      elbo <- elbo + sum(pi_bar_j * log_pq)
-    }
-    if (L > 0) {
-      # need special care for log odds when prob is near zero
-      log_odds <- log(pi_l) - log(pi_bar_l)
-      log_odds[round(pi_bar_l, 10) == 0] <- 0
-
-      # E[log p - log q]
-      log_pq <- log_odds - (tau_l * (b_bar_l^2 + 1 / tau_bar_l) + log(tau_bar_l)) / 2
-      elbo <- elbo + sum(pi_bar_l * log_pq)
-    } 
-    if (K > 0) {
-      elbo <- elbo + sum((T+B_r):(1+B_r) * rowSums((digamma(u_bar_k) - log(v_bar_k) ) * pi_bar_k)) / 2
-
-      # need special care for log odds when prob is near zero
-      log_odds <- log(pi_k) - log(pi_bar_k)
-      log_odds[round(pi_bar_k, 10) == 0] <- 0
-
-      # E[log p - log q]
-      log_pq <- log_odds + (u_k - u_bar_k) * digamma(u_bar_k)  + u_k * log(v_bar_k) + lgamma(u_bar_k) + u_bar_k * (1 - v_k / v_bar_k)
-      elbo <- elbo + sum(pi_bar_k * log_pq)
-    }
-    
-    # l2 convergence check
-    if (conv_crit == "l2") {
-      error <- sqrt(sum((params - new_params)^2))
-      params <- new_params
-    } 
-    
-    # elbo convergence check
-    elbo_track[iter+1] <- elbo
-    if (conv_crit == "ELBO") {
-      error <- elbo - elbo_track[iter]
-    }
-    
-    if (error < tol) break
-    if (verbose & iter %% 1000 == 0) print(paste0("Iteration ", iter,", Error: ", error))      
   }
   
-  # reassemble y 
-  if (B_l > 0) {
-    y <- c(y_0, y)
+  #### auto procedure with single component ####
+  
+  if (sum(J_auto, L_auto, K_auto) > 1) {
+    while (TRUE) {
+      elbo <- fit$elbo[length(fit$elbo)] # current value of elbo
+      if (verbose) print(paste0("(J = ",J,", L = ",L,", K = ",K,"): ELBO = ", elbo))
+      elbo_new <- rep(-Inf, 3)
+      
+      if (J_auto) {
+        # increment dimension of parameters
+        J <- J + 1 
+        tau_j <- c(tau_j, 0.001); u_j <- c(u_j, 0.001); v_j <- c(v_j, 0.001);
+        pi_j <- cbind(1 / T, pi_j)
+        pi_bar_j <- cbind(1 / T, pi_bar_j)
+        b_bar_j <- cbind(0.0, b_bar_j)
+        tau_bar_j <- cbind(1.0, tau_bar_j)
+        mu_lambda_j <- cbind(0.0, mu_lambda_j)
+        mu2_lambda_j <- cbind(0.0, mu2_lambda_j)
+        u_bar_j <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, u_bar_j) 
+        v_bar_j <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, v_bar_j)
+        lambda_bar_j <- cbind(1.0, lambda_bar_j)
+        
+        # fit new model 
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+        
+        # extract elbo
+        elbo_new[1] = fit$elbo[length(fit$elbo)]
+        
+        # decrement dimension of parameters
+        J <- J - 1
+        tau_j <- tau_j[-1]; u_j <- u_j[-1]; v_j <- v_j[-1];
+        pi_j <- pi_j[,-1, drop = FALSE]
+        pi_bar_j <- pi_bar_j[,-1, drop = FALSE]
+        b_bar_j <- b_bar_j[,-1, drop = FALSE]
+        tau_bar_j <- tau_bar_j[,-1, drop = FALSE]
+        mu_lambda_j <- mu_lambda_j[,-1, drop = FALSE]
+        mu2_lambda_j <- mu2_lambda_j[,-1, drop = FALSE]
+        u_bar_j <- u_bar_j[,-1, drop = FALSE]
+        v_bar_j <- v_bar_j[,-1, drop = FALSE]
+        lambda_bar_j <- lambda_bar_j[,-1, drop = FALSE]
+        
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+      }
+      
+      if (L_auto) {
+        # increment dimension of parameters
+        L <- L + 1
+        tau_l <- c(tau_l, 0.001)
+        pi_l <- cbind(1 / T, pi_l)
+        pi_bar_l <- cbind(1 / T, pi_bar_l)
+        b_bar_l <- cbind(0.0, b_bar_l)
+        tau_bar_l <- cbind(1.0, tau_bar_l)
+        mu_bar_l <- cbind(0.0, mu_bar_l)
+        mu2_bar_l <- cbind(0.0, mu2_bar_l)
+        
+        # fit new model 
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+        
+        # extract elbo
+        elbo_new[2] = fit$elbo[length(fit$elbo)]
+        
+        # decrement dimension of parameters
+        L <- L - 1
+        tau_l <- tau_l[-1]
+        pi_l <- pi_l[,-1, drop = FALSE]
+        pi_bar_l <- pi_bar_l[,-1, drop = FALSE]
+        b_bar_l <- b_bar_l[,-1, drop = FALSE]
+        tau_bar_l <- tau_bar_l[,-1, drop = FALSE]
+        mu_bar_l <- mu_bar_l[,-1, drop = FALSE]
+        mu2_bar_l <- mu2_bar_l[,-1, drop = FALSE]
+        
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+      }
+      
+      if (K_auto) {
+        # increment dimension of parameters
+        K <- K + 1
+        u_k <- c(u_k, 0.001); v_k <- c(v_k, 0.001);
+        pi_k <- cbind(1 / T, pi_k)
+        pi_bar_k <- cbind(1 / T, pi_bar_k)
+        u_bar_k <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, u_bar_k) 
+        v_bar_k <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, v_bar_k)
+        lambda_bar_k <- cbind(1.0, lambda_bar_k)
+        
+        # fit new model
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+        
+        # extract elbo
+        elbo_new[3] = fit$elbo[length(fit$elbo)]
+        
+        # decrement dimension of parameters
+        K <- K - 1
+        u_k <- u_k[-1]; v_k <- v_k[-1];
+        pi_k <- pi_k[,-1, drop = FALSE]
+        pi_bar_k <- pi_bar_k[,-1, drop = FALSE]
+        u_bar_k <- u_bar_k[,-1, drop = FALSE]
+        v_bar_k <- v_bar_k[,-1, drop = FALSE]
+        lambda_bar_k <- lambda_bar_k[,-1, drop = FALSE]
+        
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+      }
+      
+      if (max(elbo_new) < elbo) break
+      else if (which.max(elbo_new) == 1) {
+        # increment dimension of parameters
+        J <- J + 1 
+        tau_j <- c(tau_j, 0.001); u_j <- c(u_j, 0.001); v_j <- c(v_j, 0.001);
+        pi_j <- cbind(1 / T, pi_j)
+        pi_bar_j <- cbind(1 / T, pi_bar_j)
+        b_bar_j <- cbind(0.0, b_bar_j)
+        tau_bar_j <- cbind(1.0, tau_bar_j)
+        mu_lambda_j <- cbind(0.0, mu_lambda_j)
+        mu2_lambda_j <- cbind(0.0, mu2_lambda_j)
+        u_bar_j <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, u_bar_j) 
+        v_bar_j <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, v_bar_j)
+        lambda_bar_j <- cbind(1.0, lambda_bar_j)
+        
+        # fit new model 
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+        
+        # extract elbo
+        elbo = fit$elbo[length(fit$elbo)]
+      } else if (which.max(elbo_new) == 2) {
+        # increment dimension of parameters
+        L <- L + 1
+        tau_l <- c(tau_l, 0.001)
+        pi_l <- cbind(1 / T, pi_l)
+        pi_bar_l <- cbind(1 / T, pi_bar_l)
+        b_bar_l <- cbind(0.0, b_bar_l)
+        tau_bar_l <- cbind(1.0, tau_bar_l)
+        mu_bar_l <- cbind(0.0, mu_bar_l)
+        mu2_bar_l <- cbind(0.0, mu2_bar_l)
+        
+        # fit new model 
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+        
+        # extract elbo
+        elbo = fit$elbo[length(fit$elbo)]
+      } else {
+        # increment dimension of parameters
+        K <- K + 1
+        u_k <- c(u_k, 0.001); v_k <- c(v_k, 0.001);
+        pi_k <- cbind(1 / T, pi_k)
+        pi_bar_k <- cbind(1 / T, pi_bar_k)
+        u_bar_k <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, u_bar_k) 
+        v_bar_k <- cbind(0.001 + (T + B_r - 1:T + 1) / 2, v_bar_k)
+        lambda_bar_k <- cbind(1.0, lambda_bar_k)
+        
+        # fit new model
+        fit <- mich_cpp(y_0, y, J, L, K, mu_0, lambda_0,
+                        B_l, B_r, fit_intercept, fit_scale, 
+                        max_iter, verbose = FALSE, tol, 
+                        tau_j, u_j, v_j, log(pi_j), pi_bar_j, b_bar_j, tau_bar_j, u_bar_j, v_bar_j,
+                        mu_lambda_j, mu2_lambda_j, lambda_bar_j, 
+                        tau_l, log(pi_l), pi_bar_l, b_bar_l, tau_bar_l, 
+                        mu_bar_l, mu2_bar_l,
+                        u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
+                        lambda_bar_k)
+        
+        # extract elbo
+        elbo = fit$elbo[length(fit$elbo)]
+      }
+    }
   }
   
-  # construct mean signal 
-  mu <- rep(mu_0, T)
-  if (J > 0) mu <- mu + rowSums(apply(b_bar_j * pi_bar_j, 2, cumsum)) 
-  if (L > 0) mu <- mu + rowSums(apply(b_bar_l * pi_bar_l, 2, cumsum)) 
-  mu <- c(rep(mu_0, B_l), mu, rep(mu[T], B_r))
-  
-  # construct scale signal 
-  lambda_bar <- c(rep(lambda_0, B_l), lambda_bar)
-  
-  ret <- list(y = y, mu = mu, lambda = lambda_bar, 
-              J = J, K = K, L = L, 
-              elbo = elbo_track[1:iter+1], converged = (max_iter > iter))
-  
-  if (fit.intercept) ret$mu_0 <- mu_0
-  if (fit.scale) ret$lambda_0 <- lambda_0
-  if (J > 0) {
-    ret$mean.scale.model <- list(b = b_bar_j, tau = tau_bar_j, 
-                                 u = u_bar_j, v = v_bar_j,
-                                 probs = rbind(matrix(0, ncol = J, nrow = B_l), 
-                                               pi_bar_j,
-                                               matrix(0, ncol = J, nrow = B_r)))
-  } 
-  if (L > 0) {
-    ret$mean.model <- list(b = b_bar_l, tau = tau_bar_l, 
-                           probs = rbind(matrix(0, ncol = L, nrow = B_l), 
-                                         pi_bar_l,
-                                         matrix(0, ncol = L, nrow = B_r)))
-  }
-  if (K > 0) {
-    ret$scale.model <- list(u = u_bar_k, v = v_bar_k, 
-                            probs = rbind(matrix(0, ncol = K, nrow = B_l), 
-                                          pi_bar_k,
-                                          matrix(0, ncol = K, nrow = B_r)))
-  }
-  return(ret)
+  #### return model ####
+  return(fit)
 }
 
