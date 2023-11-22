@@ -1,4 +1,3 @@
-#### helper functions #### 
 
 revcumsum <- function(x){
   T <- length(x)
@@ -6,19 +5,15 @@ revcumsum <- function(x){
   return(x[T] + s[T] - s)
 }
 
-#### data formatting functions #### 
-
 prob_check <- function(probs, n, T) {
-  if (n == 0) return (matrix(ncol = n, nrow = T))
-  test <- TRUE
-  if (is.null(probs)) {
-    probs <- matrix(1 / T, ncol = n, nrow = T)
-  } else {
-    if (!is.numeric(probs)) test <- FALSE
-    if (is.array(probs) & (nrow(probs) != T | ncol(probs) != n | any(round(colSums(probs), 10) != 1))) test <- FALSE
+  if (is.null(probs)) return(matrix(nrow = T, ncol = n))
+  if (is.vector(probs)) probs <- sapply(1:max(1,n), function(i) probs)
+  if (is.array(probs)) {
+    if (nrow(probs) != T) return(NULL)
+    if (any(round(colSums(probs), 10) != 1)) return(NULL)
+    if (n > 0 & ncol(probs) != n) return(NULL)
   }
-  if (test) return(probs)
-  else return(NULL)
+  return(probs)
 }
 
 prior_check <- function(prior, n) {
@@ -31,10 +26,8 @@ prior_check <- function(prior, n) {
   else return (prior)
 }
 
-component_check <- function(n) {
-  if (is.character(n)) {
-    if (n == "auto") return(n)
-  } else if (is.numeric(n)) {
+integer_check <- function(n) {
+  if (is.numeric(n)) {
     if  (n == round(n) & n >= 0) return (n)
   } else return(NULL)
 }

@@ -5,7 +5,7 @@ u_j = 1e-3; v_j = u_j; u_k = u_j; v_k = v_j;
 p_l = NULL; pi_j = NULL; pi_k = NULL;
 # Data Generation
 
-set.seed(10)
+set.seed(11)
 
 T <- 800
 
@@ -20,7 +20,7 @@ lambda[401:600] <- .5
 lambda[601:T] <- 2
 
 y <- rnorm(T, mean = mu, sd = sqrt(1 / lambda))
-tmp=mich(y, J = 3, verbose = TRUE, fit.intercept = FALSE, fit.scale = FALSE)
+tmp=mich(y, J = 0, J_auto = TRUE, verbose = TRUE, fit_intercept = FALSE, fit_scale = FALSE)
 tmp=mich(y, K = 3, L = 3, verbose = TRUE, fit.intercept = TRUE, fit.scale = TRUE)
 
 tmp=mich(dat$y, J=4, L=4, K=4, verbose = TRUE, fit.intercept = FALSE, fit.scale = FALSE, conv_crit = "ELBO", tol = 1e-3)

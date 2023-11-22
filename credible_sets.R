@@ -59,50 +59,55 @@ cred_set <- function(prob, level) {
   order(prob, decreasing = TRUE)[1:which.max(cumsum(prob[order(prob, decreasing = TRUE)]) > level)]
 }
 
-mich_sets <- function(probs, max_length = floor(0.25 * nrow(probs)), level = 0.9, merge_prob = 0.25) {
+mich_sets <- function(probs, max_length = floor(0.25 * nrow(probs)), level = 0.9, merge_prob = 0.5) {
+  
+  cred_sets <- apply(probs, 2, cred_set, level = level, simplify = FALSE)
+  
+  # drop probs/sets that are longer than max_length
+  keep <- which(sapply(cred_sets, length) <= max_length)
+  probs <- probs[,keep, drop = FALSE]
+  cred_sets <- lapply(keep, function(i) cred_sets[[i]])
+  
   L <- ncol(probs)
   T <- nrow(probs)
   
+  if (L == 0) return (list())
+  if (L == 1) return(cred_sets)
+  
+  # compute pairwise merge probabilities 
+  pair_probs <- t(probs) %*% probs
+  
+  # adjacency matrix
+  merge_mat <- pair_probs >= merge_prob
+  
+  # force transitivity
+  for (i in 1:L) {
+    for (j in 1:L) {
+      for (k in 1:L) {
+        if (merge_mat[i,k] & merge_mat[k,j]) {
+          merge_mat[i,j] <- TRUE
+        }
+      }
+    }
+  }
+
+  # list of merged columns
+  merges <- unique(apply(merge_mat, 2, which))
+
   # initialize credible sets
   cs <- list()
   
-  # columns to skip due to duplication
-  skip <- c()
-  for(l in 1:L) {
-    if (l %in% skip) next
-    
-    # construct credible set from l^th column of probs
-    set <- cred_set(probs[,l], level)
-    
-    if (l < L) {
-      for (k in (l+1):L) {
-        # if pairwise posterior prob that two sets contain the same change point
-        # exceeds merge_prob, then merge the credible sets and skip that column
-        if (sum(probs[,l] * probs[,k] >= merge_prob)) {
-          set <- union(set, cred_set(probs[,k], level))
-          skip <- c(skip, k)
-        }
-      }
+  for (i in 1:length(merges)) {
+    set <- c()
+    for (j in merges[[i]]) {
+      set <- union(set, cred_sets[[j]])
     }
     
     # throw out sets that are longer than max_length
     if (length(set) <= max_length) {
-      cs <- c(cs,list(set[order(set)]))
+      cs <- c(cs, list(set[order(set)]))
     }
   }
-  
-  if (length(cs) == 0) return(cs)
-  
-  cs <- unique(cs)
-  # nset <- length(cs)
-  # subset <- c()
-  # for (i in 1:nset) {
-  #   for(j in 1:nset) {
-  #     if (i == j) next
-  #     if (length(setdiff(cs[[i]], cs[[j]])) == 0) subset <- c(subset, i)
-  #   }
-  # }
-  # if (length(subset) > 0) cs[[subset]] <- NULL
-  
   return(cs)
 }
+

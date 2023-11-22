@@ -54,7 +54,8 @@ double elbo_fn(int T, int B_l, int B_r, double mu_0, double lambda_0,
 }
 
 // [[Rcpp::export]]
-NumericVector lambda_bar_fn(NumericVector u, NumericVector v, NumericVector prob, int B_r) {
+NumericVector lambda_bar_fn(NumericVector u, NumericVector v, 
+                            NumericVector prob, int B_r) {
   int T = prob.length();
   double fwd_sum = 0.0, rev_sum = 1.0;
   NumericVector lambda_bar (T + B_r, 0.0);
@@ -87,7 +88,8 @@ NumericVector mu_bar_fn(NumericVector b, NumericVector prob, int B_r) {
 }
 
 // [[Rcpp::export]]
-NumericVector mu2_bar_fn(NumericVector b, NumericVector tau, NumericVector prob, int B_r) {
+NumericVector mu2_bar_fn(NumericVector b, NumericVector tau, 
+                         NumericVector prob, int B_r) {
   int T = prob.length();
   double fwd_sum = 0.0;
   NumericVector mu2_bar (T + B_r, 0.0);
@@ -103,7 +105,8 @@ NumericVector mu2_bar_fn(NumericVector b, NumericVector tau, NumericVector prob,
 }
 
 // [[Rcpp::export]]
-NumericVector mu_lambda_fn(NumericVector b, NumericVector u, NumericVector v, NumericVector prob, int B_r) {
+NumericVector mu_lambda_fn(NumericVector b, NumericVector u, NumericVector v, 
+                           NumericVector prob, int B_r) {
   int T = prob.length();
   double fwd_sum = 0.0;
   NumericVector mu_lambda (T + B_r, 0.0);
@@ -119,7 +122,8 @@ NumericVector mu_lambda_fn(NumericVector b, NumericVector u, NumericVector v, Nu
 }
 
 // [[Rcpp::export]]
-NumericVector mu2_lambda_fn(NumericVector b, NumericVector tau, NumericVector u, NumericVector v, NumericVector prob, int B_r) {
+NumericVector mu2_lambda_fn(NumericVector b, NumericVector tau, NumericVector u,
+                            NumericVector v, NumericVector prob, int B_r) {
   int T = prob.length();
   double fwd_sum = 0.0;
   NumericVector mu2_lambda (T + B_r, 0.0);
@@ -135,7 +139,8 @@ NumericVector mu2_lambda_fn(NumericVector b, NumericVector tau, NumericVector u,
 }
 
 // [[Rcpp::export]]
-List smcp(NumericVector y, NumericVector lambda, double tau, NumericVector log_pi, int B_r) {
+List smcp(NumericVector y, NumericVector lambda, double tau, 
+          NumericVector log_pi, int B_r) {
   int T = y.length() - B_r;
   NumericVector mu (T), pi_bar (T), tau_bar (T);
   double tot = 0, ls = 0, ys = 0, log_pi_max = R_NegInf;
@@ -159,7 +164,8 @@ List smcp(NumericVector y, NumericVector lambda, double tau, NumericVector log_p
 }
 
 // [[Rcpp::export]]
-List sscp(NumericVector y, NumericVector tau, double u, NumericVector v, NumericVector log_pi, int B_r) {
+List sscp(NumericVector y, NumericVector tau, double u, 
+          NumericVector v, NumericVector log_pi, int B_r) {
   int T = y.length() - B_r;
   double half = T / 2.0;
   NumericVector pi_bar (T, 0.0), v_bar (T), u_bar (T);
@@ -188,7 +194,9 @@ List sscp(NumericVector y, NumericVector tau, double u, NumericVector v, Numeric
 }
 
 // [[Rcpp::export]]
-List smscp(NumericVector y, NumericVector lambda, double tau, double u, NumericVector v, NumericVector log_pi, int B_r) {
+List smscp(NumericVector y, NumericVector lambda, 
+           double tau, double u, NumericVector v, 
+           NumericVector log_pi, int B_r) {
   int T = y.length() - B_r;
   double half = T / 2.0;
   NumericVector mu (T), pi_bar (T, 0.0), u_bar (T), v_bar (T), tau_bar (T);
@@ -435,6 +443,7 @@ List mich_cpp(NumericVector y_0, NumericVector y, int J, int L, int K, double mu
   }
   
   for (int t = 0; t < B_l; t++) {
+    r_tilde.push_front(y_0[t] - mu_0);
     mu.push_front(mu_0); // construct mean signal
     lambda_bar.push_front(lambda_0); // construct scale signal
   }
@@ -443,49 +452,26 @@ List mich_cpp(NumericVector y_0, NumericVector y, int J, int L, int K, double mu
   List J_model, L_model, K_model;
   
   if (J > 0) {
-    J_model =  List::create(_["pi"] = pi_bar_j, _["b"] = b_bar_j, _["tau"] = tau_bar_j, _["v"] = v_bar_j, _["u"] = u_bar_j);
+    J_model =  List::create(_["pi"] = pi_bar_j, _["b"] = b_bar_j, 
+                            _["tau"] = tau_bar_j, _["v"] = v_bar_j, 
+                            _["u"] = u_bar_j);
   }
   if (L > 0) {
-    L_model =  List::create(_["pi"] = pi_bar_l, _["b"] = b_bar_l, _["tau"] = tau_bar_l);
+    L_model =  List::create(_["pi"] = pi_bar_l, _["b"] = b_bar_l, 
+                            _["tau"] = tau_bar_l);
   }
   if (K > 0) {
-    K_model =  List::create(_["pi"] = pi_bar_k, _["v"] = v_bar_k, _["u"] = u_bar_k);
+    K_model =  List::create(_["pi"] = pi_bar_k, _["v"] = v_bar_k,
+                            _["u"] = u_bar_k);
   }
   
-  List result = List::create(_["y_0"] = y_0, _["y"] = y, _["mu"] = mu, _["lambda"] = lambda_bar, 
-                             _["converged"] = (max_iter > iter), _["elbo"] = elbo, 
+  List result = List::create(_["residual"] = r_tilde, _["mu"] = mu, 
+                             _["lambda"] = lambda_bar, 
+                             _["converged"] = (max_iter > iter), 
+                             _["elbo"] = elbo, 
                              _["mu_0"] = mu_0, _["lambda_0"] = lambda_0,
-                             _["J_model"] = J_model, _["L_model"] = L_model, _["K_model"] = K_model);
+                             _["J"] = J, _["J_model"] = J_model, 
+                             _["L"] = L, _["L_model"] = L_model, 
+                             _["K"] = K, _["K_model"] = K_model);
   return result;
 }
-
-
-/*** R
-# T = 100; B_l = 1; B_r = 1;
-# lambda = 1 / sqrt(c(rep(0.5, 33), rep(3, 33), rep(0.25, 35)))
-# mu = c(rep(-2, 33), rep(4, 33), rep(1, 35))
-# y = rnorm(T+B_r+B_l, mean = mu, sd = lambda);
-# B_r = 1; T = length(dat$y) - B_r;
-# J = 0; L = 2; K = 2; 
-# fit_intercept = FALSE; fit_scale = FALSE; max_iter = 1e5;
-# tau_j = rep(0.01, J); u_j = tau_j; v_j = u_j; pi_j = matrix(1/T, T, J);
-# tau_l = rep(0.01, L); pi_l = matrix(1/T, T, L);
-# u_k = rep(0.01, K); v_k = u_k; pi_k = matrix(1/T, T, K);
-
-# fit = mich(y, J, L, K, fit_intercept = TRUE, fit_scale = TRUE)
-
-# microbenchmark(
-# mich(y, J, L, K,
-#      B_l, B_r, fit_intercept, fit_scale, max_iter, verbose = FALSE,
-#      tau_j, u_j, v_j, pi_j,
-#      tau_l, pi_l,
-#      u_k, v_k, pi_k),
-# michR(y, J, L, K, max_iter = max_iter, tol = -Inf, verbose = FALSE))
-
-# NumericVector y, int J, int L, int K, 
-# int B_l, int B_r, bool fit_intercept, bool fit_scale, 
-# int max_iter, bool verbose, double tol, 
-# NumericVector tau_j, NumericVector u_j, NumericVector v_j, NumericMatrix log_pi_j,
-# NumericVector tau_l, NumericMatrix log_pi_l,
-# NumericVector u_k, NumericVector v_k, NumericMatrix log_pi_k
-*/

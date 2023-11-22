@@ -1,5 +1,4 @@
-mich <- function(y, fit_intercept = FALSE, fit_scale = FALSE,
-                 #merge = FALSE, merge_tol = 1 / T,
+mich4 <- function(y, fit_intercept = FALSE, fit_scale = FALSE,
                  J = 0, L = 0, K = 0,
                  J_auto = FALSE, L_auto = FALSE, K_auto = FALSE,
                  tol = 1e-3, B_l = 0, B_r = 0, verbose = FALSE, max_iter = 1e4,
@@ -9,11 +8,11 @@ mich <- function(y, fit_intercept = FALSE, fit_scale = FALSE,
   
   #### checking parameters ####
   if (!is.numeric(y) | !is.vector(y)) stop("y must be a numeric vector.")
-
+  
   B_l <- integer_check(B_l)
   B_r <- integer_check(B_r)
   if (is.null(B_l) | is.null(B_r)) stop("B_l and B_r must be integers >= 0")
-
+  
   # calculate length of sequence
   T = length(y) - B_r - B_l
   
@@ -36,10 +35,10 @@ mich <- function(y, fit_intercept = FALSE, fit_scale = FALSE,
   if (!is.logical(K_auto)) stop("K_auto must be either TRUE or FALSE.")
   
   if (!is.logical(verbose)) stop("verbose must be either TRUE or FALSE.")
-
+  
   J <- integer_check(J)  
   if (is.null(J)) stop("J must be an integer >= 0.")
- 
+  
   L <- integer_check(L)  
   if (is.null(L)) stop("L must be an integer >= 0.")
   
@@ -91,7 +90,7 @@ mich <- function(y, fit_intercept = FALSE, fit_scale = FALSE,
   u_bar_j <- matrix(u_j, nrow = T, ncol = J, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
   v_bar_j <- matrix(v_j, nrow = T, ncol = J, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
   lambda_bar_j <- matrix(1.0, nrow = T + B_r, ncol = J)
-
+  
   # L components
   pi_bar_l <- matrix(1 / T, nrow = T, ncol = L)
   b_bar_l <- matrix(0.0, nrow = T, ncol = L)
@@ -128,18 +127,12 @@ mich <- function(y, fit_intercept = FALSE, fit_scale = FALSE,
                   u_k, v_k, log(pi_k), pi_bar_k, u_bar_k, v_bar_k,
                   lambda_bar_k)
   
-  #### merging redundant components ####
-  # while(TRUE & J > 0) {
-  #   merge_probs <- t(pi_bar_j) %*% pi_bar_j
-  #   merge_probs <- merge_probs[lower.tri(merge_probs)]
-  # }
-  
   #### auto procedure with single component ####
   if (sum(J_auto, L_auto, K_auto) == 1) {
-    done <- FALSE
-    counter <- ceiling(log(T)) 
+    counter <- ceiling(log(T))  
     elbo <- fit$elbo[length(fit$elbo)] # current value of elbo
     elbo_new <- elbo
+    restart <- TRUE
     
     if (verbose) print(paste0("(J = ", J, ", L = ", L, ", K = ", K, "): ELBO = ", elbo_new))
     
@@ -201,75 +194,55 @@ mich <- function(y, fit_intercept = FALSE, fit_scale = FALSE,
       if (elbo_new > elbo) {
         elbo <- elbo_new
         fit <- fit_new
-      } else {  
-        # if elbo decreases begin adaptive grid search
+        counter <- ceiling(log(T))  
+        restart <- TRUE
+      } else {
         if (J_auto) {
-          if (J == 1) {
-            J <- J + 1
-            pi_j <- cbind(pi_j[,1], pi_j)
-          } else {
+          if (restart & J > 1) {
             J <- J - 1
-            pi_j <- pi_j[,-1, drop = FALSE] 
+            tau_j <- tau_j[-1]; u_j <- u_j[-1]; v_j <- v_j[-1];
+            pi_j <- pi_j[,-1, drop = FALSE]
           }
-        } else if (L_auto) {
-          if (L == 1) {
-            L <- L + 1
-            pi_l <- cbind(pi_l[,1], pi_l)
-          } else {
+          pi_bar_j <- matrix(1 / T, nrow = T, ncol = J)
+          b_bar_j <- matrix(0.0, nrow = T, ncol = J)
+          tau_bar_j <- matrix(1.0, nrow = T, ncol = J)
+          mu_lambda_j <- matrix(0.0, nrow = T + B_r, ncol = J)
+          mu2_lambda_j <- matrix(0.0, nrow = T + B_r, ncol = J)
+          u_bar_j <- matrix(u_j, nrow = T, ncol = J, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
+          v_bar_j <- matrix(v_j, nrow = T, ncol = J, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
+          lambda_bar_j <- matrix(1.0, nrow = T + B_r, ncol = J)
+        }
+        
+        if (L_auto) {
+          if (restart & L > 1) {
             L <- L - 1
-            pi_l <- pi_l[,-1, drop = FALSE] 
+            tau_l <- tau_l[-1];
+            pi_l <- pi_l[,-1, drop = FALSE]
           }
-        } else {
-          if (K == 1) {
-            K <- K + 1
-            pi_k <- cbind(pi_k[,1], pi_k)
-          } else {
+          pi_bar_l <- matrix(1 / T, nrow = T, ncol = L)
+          b_bar_l <- matrix(0.0, nrow = T, ncol = L)
+          tau_bar_l <- matrix(1.0, nrow = T, ncol = L)
+          mu_bar_l <- matrix(0.0, nrow = T + B_r, ncol = L)
+          mu2_bar_l <- matrix(0.0, nrow = T + B_r, ncol = L)
+        }
+        
+        if (K_auto) {
+          if (restart & K > 1) {
             K <- K - 1
-            pi_k <- pi_k[,-1, drop = FALSE] 
+            u_k <- u_k[-c(1,2)]; v_k <- v_k[-c(1,2)];
+            pi_k <- pi_k[,-c(1,2), drop = FALSE]
           }
+          pi_bar_k <- matrix(1 / T, nrow = T, ncol = K)
+          u_bar_k <- matrix(u_k, nrow = T, ncol = K, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
+          v_bar_k <-  matrix(v_k, nrow = T, ncol = K, byrow = TRUE) + (T + B_r - 1:T + 1) / 2
+          lambda_bar_k <- matrix(1.0, nrow = T + B_r, ncol = K)
         }
         
-        fit_new <- mich(c(y_0, y), fit_intercept, fit_scale, 
-                        J = J, L = L, K = K,
-                        pi_j = pi_j, pi_l = pi_l, pi_k = pi_k,
-                        B_l = B_l, B_r = B_r, tol = tol, max_iter = max_iter)
-        
-        elbo_new <- fit_new$elbo[length(fit_new$elbo)]
-        if (verbose) print(paste0("(J = ", J, ", L = ", L, ", K = ", K, "): ELBO = ", elbo_new))
-        
-        while (TRUE) {
-          
-          if (elbo_new > elbo) {
-            fit <- fit_new 
-            elbo <- elbo_new
-            counter <- ceiling(log(T)) 
-          } else counter <- counter - 1
-          if (counter == 0) {
-            done <- TRUE
-            break
-          }
-          
-          if (J_auto) {
-            J <- J + 1
-            if (J > 1) pi_j <- cbind(pi_j[,1], pi_j)
-          } else if (L_auto) {
-            L <- L + 1 
-            if (L > 1) pi_l <- cbind(pi_l[,1], pi_l)
-          } else {
-            K <- K + 1
-            if (K > 1) pi_k <- cbind(pi_k[,1], pi_k)
-          }
-          
-          fit_new <- mich(c(y_0,y), fit_intercept, fit_scale, 
-                          J = J, L = L, K = K,
-                          pi_j = pi_j, pi_l = pi_l, pi_k = pi_k,
-                          B_l = B_l, B_r = B_r, tol = tol, max_iter = max_iter)
-          
-          elbo_new <- fit_new$elbo[length(fit_new$elbo)]
-          if (verbose) print(paste0("(J = ", J, ", L = ", L, ", K = ", K, "): ELBO = ", elbo_new))
-        }
-      }
-      if (done) break
+        restart <- FALSE
+        counter <- counter - 1
+      } 
+      
+      if (counter == 0) break
     }
   }
   
@@ -389,4 +362,3 @@ mich <- function(y, fit_intercept = FALSE, fit_scale = FALSE,
                                          matrix(0, nrow = B_r, ncol = fit$K))
   return(fit)
 }
-

@@ -21,7 +21,7 @@
 #' 
 #' @return Posterior parameters for \eqn{b \;|\; \mathbf{y}}.
 #' 
-smcp <- function(y, lambda, tau, pi, B_r) {
+smcpR <- function(y, lambda, tau, pi, B_r) {
   T <- length(y) - B_r
   tail <- (T+1):(T+B_r)
   tau <- tau + revcumsum(lambda[1:T])
@@ -51,7 +51,7 @@ smcp <- function(y, lambda, tau, pi, B_r) {
 #' 
 #' @return Posterior parameters for \eqn{s \;|\; \mathbf{y}}.
 #' 
-sscp <- function(y, lambda, u, v, pi, B_r) {
+sscpR <- function(y, lambda, u, v, pi, B_r) {
   T <- length(y) - B_r
   tail <- (T+1):(T+B_r)
   y2_lambda <- c(0, cumsum(lambda[1:(T-1)] * y[1:(T-1)]^2))
@@ -84,7 +84,7 @@ sscp <- function(y, lambda, u, v, pi, B_r) {
 #'   
 #' @return Posterior parameters for \eqn{(b,s) \;|\; \mathbf{y}}.
 #' 
-smscp <- function(y, lambda, tau, u, v, pi, B_r) {
+smscpR <- function(y, lambda, tau, u, v, pi, B_r) {
   T <- length(y) - B_r
   tail <- (T+1):(T+B_r)
   tau <- tau + revcumsum(lambda[1:T])
