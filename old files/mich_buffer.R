@@ -1,10 +1,8 @@
 mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
                  J = 0, L = 0, K = 0,
-                 J_auto = FALSE, L_auto = FALSE, K_auto = FALSE, 
-                 J_max = Inf, L_max = Inf, K_max = Inf, 
-                 tol = 1e-5, merge_prob = NULL, merge_level = 0.95, 
-                 max_iter = 1e4, verbose = FALSE, reverse = FALSE, 
-                 restart = TRUE, n_restart = 0, increment = 1,
+                 J_auto = FALSE, L_auto = FALSE, K_auto = FALSE,
+                 tol = 1e-3, B_l = 0, B_r = 0, merge_prob = NULL, merge_level = 0.9, 
+                 restart = TRUE, n_restart = 0, max_iter = 1e4, verbose = FALSE, 
                  omega_j = 1e-3, u_j = 1e-3, v_j = 1e-3, pi_j = "weighted",
                  omega_l = 1e-3, pi_l = "weighted",
                  u_k = 1e-3, v_k = 1e-3, pi_k = "weighted") {
@@ -30,7 +28,7 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
       }
     }
     d <- ncol(y)
-    T <- nrow(y)
+    T <- nrow(y) - B_r - B_l
     if (d == 1) y <- as.vector(y)
   } else {
     if (any(is.na(y))) {
@@ -38,21 +36,23 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
       y <- y[!is.na(y)]
     }
     d <- 1
-    T <- length(y)
+    T <- length(y) - B_r - B_l
   }
   
-  if (T < 2) stop("y must have at least 2 observations.")
+  if (T < 2) stop("Number of rows/elements of y smaller than B_l + B_r + 1.")
   
   #### merge and detect defaults ####
   delta <- 0.01
   merge_level <- scalar_check(merge_level)
-  if (merge_level < 0 | merge_level > 1) stop("merge_level must be in [0,1].")
   detect <- ceiling(log(T)^(2 + delta))
   if (is.null(merge_prob)) merge_prob <- detect / T^2
   merge_prob <- scalar_check(merge_prob)
-  n_search <- ceiling(log(T) / increment)
-
+  n_search <- ceiling(log(T))
+  
   #### checking other model parameters ####
+  
+  B_l <- integer_check(B_l)
+  B_r <- integer_check(B_r)
   max_iter <- integer_check(max_iter)
   tol <- scalar_check(tol)
   fit_intercept <- logical_check(fit_intercept)
@@ -67,18 +67,6 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
   L <- integer_check(L)  
   K <- integer_check(K) 
   
-  J_max <- integer_check(J_max)  
-  L_max <- integer_check(L_max)  
-  K_max <- integer_check(K_max) 
-  
-  if (J_max < J) "J_max must be >= J."
-  if (L_max < L) "L_max must be >= L."
-  if (K_max < K) "K_max must be >= K."
-  
-  if (!J_auto) J_max <- J
-  if (!L_auto) L_max <- L
-  if (!K_auto) K_max <- K
-  
   if (J > 0 & J_auto) warning(paste0("J_auto = TRUE and J > 0. Beginning search from J = ", J))
   if (L > 0 & L_auto) warning(paste0("L_auto = TRUE and L > 0. Beginning search from L = ", L))
   if (K > 0 & K_auto) warning(paste0("K_auto = TRUE and K > 0. Beginning search from K = ", K))
@@ -91,96 +79,66 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
   v_j <- scalar_check(v_j)
   
   pi_j <- prob_check(pi_j, J, T)
-  pi_j_weighted <- (pi_j == "weighted")
   if (J_auto & length(pi_j) > 1) stop("When J_auto = TRUE, pi_j must one of 'uniform' or 'weighted'.")
   if (J == 0 & !J_auto) {
-    pi_j <- matrix(1, nrow =  T) 
+    pi_j <- rep(1, T) 
   } else if (is.character(pi_j) & (J_auto | J > 0)) {
-    if (pi_j == "weighted") pi_j <- meanvar_prior(T)
-    else if (pi_j == "uniform") pi_j <- rep(1, T) 
-    pi_j <- sapply(1:max(1, J), function(i) pi_j)
+    if (pi_j == "weighted") pi_j <- meanvar_prior(T, B_r)
+    else if (pi_j == "uniform") pi_j <- rep(1/T, T) 
   } 
+  pi_j <- sapply(1:max(1, J), function(i) pi_j)
   
   # L components
   omega_l <- scalar_check(omega_l)
   
   pi_l <- prob_check(pi_l, L, T)
-  pi_l_weighted <- (pi_l == "weighted")
   if (L_auto & length(pi_l) > 1) stop("When L_auto = TRUE, pi_l must one of 'uniform' or 'weighted'.")
   if (L == 0 & !L_auto) {
-    pi_l <- matrix(1, nrow =  T)
+    pi_l <- rep(1, T) 
   } else if (is.character(pi_l) & (L_auto | L > 0)) {
-    if (pi_l == "weighted") pi_l <- mean_prior(T, d)
-    else if (pi_l == "uniform") pi_l <- rep(1, T) 
-    pi_l <- sapply(1:max(1, L), function(i) pi_l)
+    if (pi_l == "weighted") pi_l <- mean_prior(T, B_r, d)
+    else if (pi_l == "uniform") pi_l <- rep(1/T, T) 
   } 
+  pi_l <- sapply(1:max(1, L), function(i) pi_l)
 
   # K components
   u_k <- scalar_check(u_k)
   v_k <- scalar_check(v_k)
   
   pi_k <- prob_check(pi_k, K, T)
-  pi_k_weighted <- (pi_k == "weighted")
   if (K_auto & length(pi_k) > 1) stop("When K_auto = TRUE, pi_k must one of 'uniform' or 'weighted'.")
   if (K == 0 & !K_auto) {
-    pi_k <- matrix(1, nrow =  T)
+    pi_k <- rep(1, T) 
   } else if (is.character(pi_k) & (K_auto | K > 0)) {
-    if (pi_k == "weighted") pi_k <- var_prior(T)
-    else if (pi_k == "uniform") pi_k <- rep(1, T) 
-    pi_k <- sapply(1:max(1, K), function(i) pi_k)
+    if (pi_k == "weighted") pi_k <- var_prior(T, B_r)
+    else if (pi_k == "uniform") pi_k <- rep(1/T, T) 
   } 
+  pi_k <- sapply(1:max(1, K), function(i) pi_k)
 
   # call multivariate or univariate MICH
   if (is.matrix(y)) {
     if (J > 0 | K > 0) stop("MICH currently only suports mean changepoint detection for multivariate y. Try setting J = K = 0.")
-    if (T < d & fit_scale) {
+    if (T + B_l + B_r < d & fit_scale) {
       warning("y has more columns than rows. MICH does not currently support high-dimensional variance estimation. Assuming Var(y) = I.")
       fit_scale <- FALSE
     }
 
-    if (reverse) {
-      if (!pi_l_weighted) pi_l <- pi_l[T:1,,drop = FALSE]
-      
-      mich_matrix(y[T:1,], fit_intercept = TRUE, fit_scale,
-                  L, L_auto, L_max, pi_l_weighted,
-                  tol, verbose, max_iter, reverse,
-                  detect, merge_level, merge_prob, 
-                  restart, n_restart, n_search, increment,
-                  omega_l, pi_l)
-    } else {
-      mich_matrix(y, fit_intercept, fit_scale,
-                  L, L_auto, L_max, pi_l_weighted,
-                  tol, verbose, max_iter, reverse,
-                  detect, merge_level, merge_prob, 
-                  restart, n_restart, n_search, increment,
-                  omega_l, pi_l)
-    }
+    mich_matrix(y, fit_intercept, fit_scale,
+                L, L_auto, 
+                tol, B_l, B_r, verbose, max_iter,
+                detect, merge_level, merge_prob, 
+                restart, n_restart, n_search,
+                omega_l, pi_l)
+    
   } else {
-    if (reverse) {
-      if (!pi_l_weighted) pi_l <- pi_l[T:1,,drop = FALSE]
-      if (!pi_k_weighted) pi_k <- pi_k[T:1,,drop = FALSE]
-      if (!pi_j_weighted) pi_j <- pi_j[T:1,,drop = FALSE]
-      
-      mich_vector(y[T:1], fit_intercept = TRUE, fit_scale = TRUE,
-                  J, L, K, J_auto, L_auto, K_auto, J_max, L_max, K_max,
-                  pi_j_weighted, pi_l_weighted, pi_k_weighted,
-                  tol, verbose, max_iter, reverse,
-                  detect, merge_level, merge_prob, 
-                  restart, n_restart, n_search, increment,
-                  omega_j, u_j, v_j, pi_j, 
-                  omega_l, pi_l, 
-                  u_k, v_k, pi_k)
-    } else {
-      mich_vector(y, fit_intercept, fit_scale,
-                  J, L, K, J_auto, L_auto, K_auto, J_max, L_max, K_max,
-                  pi_j_weighted, pi_l_weighted, pi_k_weighted,
-                  tol, verbose, max_iter, reverse,
-                  detect, merge_level, merge_prob, 
-                  restart, n_restart, n_search, increment,
-                  omega_j, u_j, v_j, pi_j, 
-                  omega_l, pi_l, 
-                  u_k, v_k, pi_k)
-    }
+    mich_vector(y, fit_intercept, fit_scale,
+                J, L, K, J_auto, L_auto, K_auto,
+                tol, B_l, B_r, verbose, max_iter, 
+                detect, merge_level, merge_prob, 
+                restart, n_restart, n_search,
+                omega_j, u_j, v_j, pi_j, 
+                omega_l, pi_l, 
+                u_k, v_k, pi_k)
   }
 }
 

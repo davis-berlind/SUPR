@@ -59,55 +59,24 @@ cred_set <- function(prob, level) {
   order(prob, decreasing = TRUE)[1:which.max(cumsum(prob[order(prob, decreasing = TRUE)]) > level)]
 }
 
-mich_sets <- function(probs, max_length = floor(0.25 * nrow(probs)), level = 0.9, merge_prob = 0.5) {
+mich_sets <- function(probs, max_length = log(nrow(probs))^2 * 2, level = 0.9) {
+  
+  # initialize credible sets and changepoints
+  cs <- list()
+  est_cp <- numeric(0)
   
   cred_sets <- apply(probs, 2, cred_set, level = level, simplify = FALSE)
   
   # drop probs/sets that are longer than max_length
   keep <- which(sapply(cred_sets, length) <= max_length)
-  probs <- probs[,keep, drop = FALSE]
-  cred_sets <- lapply(keep, function(i) cred_sets[[i]])
-  
-  L <- ncol(probs)
-  T <- nrow(probs)
-  
-  if (L == 0) return (list())
-  if (L == 1) return(cred_sets)
-  
-  # compute pairwise merge probabilities 
-  pair_probs <- t(probs) %*% probs
-  
-  # adjacency matrix
-  merge_mat <- pair_probs >= merge_prob
-  
-  # force transitivity
-  for (i in 1:L) {
-    for (j in 1:L) {
-      for (k in 1:L) {
-        if (merge_mat[i,k] & merge_mat[k,j]) {
-          merge_mat[i,j] <- TRUE
-        }
-      }
-    }
+  if (length(keep) > 0) {
+    est_cp <- apply(probs[, keep, drop = FALSE], 2, which.max)
+    cs <- lapply(keep, function(i) cred_sets[[i]])
+    # order change-points
+    cs <- lapply(order(est_cp), function(i) cs[[i]])
+    est_cp <- est_cp[order(est_cp)]
   }
 
-  # list of merged columns
-  merges <- unique(apply(merge_mat, 2, which))
-
-  # initialize credible sets
-  cs <- list()
-  
-  for (i in 1:length(merges)) {
-    set <- c()
-    for (j in merges[[i]]) {
-      set <- union(set, cred_sets[[j]])
-    }
-    
-    # throw out sets that are longer than max_length
-    if (length(set) <= max_length) {
-      cs <- c(cs, list(set[order(set)]))
-    }
-  }
-  return(cs)
+  return(list(cp = est_cp, sets = sapply(cs, function(set) set[order(set)])))
 }
 

@@ -54,9 +54,9 @@ hsmuce_simulation <- function(T, K, C, min_space, B_l = min_space, B_r = min_spa
          )
 }
 
-fpsle <- function(true_cp, est_cp, T) {
-  true_cp <- unique(c(1, true_cp[order(true_cp)], T+1))
-  est_cp <- unique(c(1, est_cp[order(est_cp)], T+1))
+fpsle <- function(true_cp, est_cp) {
+  true_cp <- unique(true_cp[order(true_cp)])
+  est_cp <- unique(est_cp[order(est_cp)])
   K <- length(est_cp)
   mid <- est_cp[-K] + diff(est_cp) / 2
   nbs <- as.numeric(cut(mid, true_cp, include.lowest = TRUE))
@@ -64,12 +64,11 @@ fpsle <- function(true_cp, est_cp, T) {
   return(error)
 }
 
-fnsle <- function(true_cp, est_cp, T) {
-  fpsle(est_cp, true_cp, T)
+fnsle <- function(true_cp, est_cp) {
+  fpsle(est_cp, true_cp)
 }
 
-hausdorff <- function(true_cp, est_cp, T) {
-  if (length(est_cp) == 0) return(T)
-  else return(max(sapply(true_cp, function(x) min(abs(x - est_cp)))))
+hausdorff <- function(true_cp, est_cp) {
+  max(sapply(true_cp, function(x) min(abs(x - est_cp))))
 }
 

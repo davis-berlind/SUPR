@@ -6,28 +6,44 @@ revcumsum <- function(x){
 }
 
 prob_check <- function(probs, n, T) {
-  if (is.null(probs)) return(matrix(nrow = T, ncol = n))
-  if (is.vector(probs)) probs <- sapply(1:max(1,n), function(i) probs)
-  if (is.array(probs)) {
-    if (nrow(probs) != T) return(NULL)
-    if (any(round(colSums(probs), 10) != 1)) return(NULL)
-    if (n > 0 & ncol(probs) != n) return(NULL)
+  if (length(probs) == 1) {
+    if (probs %in% c("uniform", "weighted")) return(probs)
+  } else if (is.vector(probs) & is.numeric(probs)) {
+    if (all(!is.na(probs)) & (length(probs) == T) & is.numeric(probs)) {
+      if (round(sum(probs), 10) == 1) return(sapply(1:max(1, n), function(i) probs))
+    }
+  } else if (is.array(probs) & is.numeric(probs)) {
+    if (all(!is.na(probs)) & (nrow(probs) == T & ncol(probs) == n)) {
+      if (all(round(colSums(probs), 10) == 1))  return(probs)
+    }
   }
-  return(probs)
+  stop(paste0(deparse(substitute(probs)), 
+              " must be 'uniform', 'weighted', or a length T vector or a T x ",
+              deparse(substitute(n)),
+              " matrix with columns that sum to one."))
 }
 
-prior_check <- function(prior, n) {
-  if (length(n) == 0) return(numeric())
-  test <- TRUE
-  if (!is.numeric(prior)) test <- FALSE
-  else if (any(prior < 0) | (length(prior) > 1 & length(prior) != n)) test <- FALSE
-  if (!test) return(NULL)
-  else if (length(prior) == 1) return(rep(prior, n))
-  else return (prior)
+logical_check <- function(x) {
+  if (is.logical(x) & length(x) == 1) {
+    if (!is.na(x)) return(x) 
+  }
+  stop(paste0(deparse(substitute(x)), " must be TRUE or FALSE."))
+}
+
+scalar_check <- function(x) {
+  if (is.numeric(x) & length(x) == 1) {
+    if (!is.na(x)) {
+      if (x > 0) return(x) 
+    }
+  } 
+  stop(paste0(deparse(substitute(x)), " must be an scalar > 0."))
 }
 
 integer_check <- function(n) {
-  if (is.numeric(n)) {
-    if  (n == round(n) & n >= 0) return (n)
-  } else return(NULL)
+  if (is.numeric(n) & length(n) == 1) {
+    if (!is.na(n)) {
+      if (n == round(n) & n >= 0) return(n) 
+    }
+  }
+  stop(paste0(deparse(substitute(n)), " must be an integer >= 0."))
 }

@@ -670,11 +670,14 @@ saveRDS(results, "~/Desktop/simulation_1_results.rds")
 
 other_results <- readRDS("~/Desktop/simulation_1_results.rds")
 
-
+methods = c("MICH (J,0,0) Oracle - IW",
+            "MICH (J,0,0) Fast-Auto - IW",
+            "MICH (J,0,0) Auto - IW",
+            "H-SMUCE", "PELT", "MOSUM BU", "NOT")
 i=10
 other_results %>% 
+  filter(method %in% methods) %>% 
   filter(T == settings$T[i], L == settings$L[i], min_space == settings$min_space[i]) %>% 
-  filter(grepl("H-SMUCE|PELT)", method)) %>% 
   group_by(method, T, L, min_space) %>% 
   summarize("|L - L_hat|" = mean(abs(L - L_est)),
             "<= -2" = mean((L - L_est) <= -2),
@@ -685,14 +688,14 @@ other_results %>%
             ci_length = sum(L_est * avg_len) / sum(L_est),
             coverage = sum(n_covered) / sum(n_detected),
             hausdorff = mean(hausdorff, na.rm = TRUE),
-            fpsle = mean(fpsle, na.rm = TRUE),
-            fnsle = mean(fnsle, na.rm = TRUE),
-            #mean_mse = mean(mean_mse, na.rm = TRUE),
-            #var_mse = mean(var_mse, na.rm = TRUE),
+            # fpsle = mean(fpsle, na.rm = TRUE),
+            # fnsle = mean(fnsle, na.rm = TRUE),
+            # mean_mse = mean(mean_mse, na.rm = TRUE),
+            # var_mse = mean(var_mse, na.rm = TRUE),
             time = mean(time, na.rm = TRUE)) %>% 
   mutate_if(is.numeric, ~format(round(.,2), nsmall = 2)) %>% 
-  arrange(T, L, min_space) #%>% 
-  # write.csv("~/Desktop/results.csv", row.names = FALSE)
+  arrange(T, L, min_space) #%>%
+  #write.csv("~/Desktop/results.csv", row.names = FALSE)
   
 settings[i,]
 
