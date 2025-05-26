@@ -76,7 +76,6 @@ mich_sets <- function(probs, max_length = log(nrow(probs))^2 * 2, level = 0.9) {
     cs <- lapply(order(est_cp), function(i) cs[[i]])
     est_cp <- est_cp[order(est_cp)]
   }
-
-  return(list(cp = est_cp, sets = sapply(cs, function(set) set[order(set)])))
+  return(list(cp = est_cp, sets = lapply(cs, function(set) set[order(set)])))
 }
 

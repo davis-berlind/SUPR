@@ -325,7 +325,7 @@ List mich_cpp(NumericVector y,
         mu_bar_jt = mu_lambda_j(t,j) / lambda_bar_j(t,j);
         r_tilde[t] -= mu_bar_jt;
         lambda_bar[t] *= lambda_bar_j(t,j);
-        delta[t] -= (mu_lambda_j(t,j) * mu_bar_jt - mu2_lambda_j(t,j)) / lambda_bar_j(t,j);
+        delta[t] -= mu_bar_jt * mu_bar_jt - mu2_lambda_j(t,j) / lambda_bar_j(t,j);
       }
       
       for (int l = 0; l < L; l++) {
@@ -363,6 +363,7 @@ List mich_cpp(NumericVector y,
         r_tilde[t] += mu_bar_l(t,l);
         // subtract l^th component of variance correction
         delta[t] += mu_bar_l(t,l) * mu_bar_l(t,l) - mu2_bar_l(t,l);
+        delta[t] = std::max(0.0, delta[t]);
       }
       
       // fit single mean_scp model on residuals
@@ -383,6 +384,7 @@ List mich_cpp(NumericVector y,
         r_tilde[t] -= mu_bar_l(t,l);
         // add back l^th component of variance correction
         delta[t] -= mu_bar_l(t,l) * mu_bar_l(t,l) - mu2_bar_l(t,l);
+        delta[t] = std::max(0.0, delta[t]);
       }
     }
     
@@ -394,19 +396,17 @@ List mich_cpp(NumericVector y,
       
       for (int t = T - 1; t >= 0; t--) {
         // divide out k^th component of precision
-        if (t > T-t-1) {
-          lambda_bar[t] /= lambda_bar_k(t,k);
-          lambda_bar[T-t-1] /= lambda_bar_k(T-t-1,k);
-        } else if (t == T-t-1){
-          lambda_bar[t] /= lambda_bar_k(t,k);
-        }
+        lambda_bar[t] /= lambda_bar_k(t,k);
         
         // calculate corrected priors
         v_tilde_sum += 0.5 * lambda_bar[t] * delta[t];
         v_tilde[t] = v_k + v_tilde_sum;
-        log_pi_tilde[T-t-1] = log_pi_k(T-t-1,k) + log_pi_tilde_sum;
-        log_pi_tilde_sum += -0.5 * lambda_bar[T-t-1] * delta[T-t-1];
-        log_pi_tilde_max = std::max(log_pi_tilde_max, log_pi_tilde[T-t-1]);
+      }
+      
+      for (int t = 1; t < T; t++) {
+        log_pi_tilde_sum += -0.5 * lambda_bar[t-1] * delta[t-1];
+        log_pi_tilde[t] = log_pi_k(t,k) + log_pi_tilde_sum;
+        log_pi_tilde_max = std::max(log_pi_tilde_max, log_pi_tilde[t]);
       }
       
       for (int t = 1; t < T; t++) {
@@ -437,60 +437,57 @@ List mich_cpp(NumericVector y,
       log_pi_tilde_sum = log_pi_j(0,j);
       log_pi_tilde_max = R_NegInf;
       
-      // for (int t = T-1; t >= 0; t--) {
-      //   // add back j^th component of residual
-      //   mu_bar_jt = mu_lambda_j(t,j) / lambda_bar_j(t,j);
-      //   r_tilde[t] += mu_bar_jt;
-      //   // divide out j^th component of precision
-      //   lambda_bar[t] /= lambda_bar_j(t,j);
-      //   // subtract j^th component of variance correction
-      //   delta[t] += mu_bar_jt * mu_bar_jt - mu2_lambda_j(t,j) / lambda_bar_j(t,j);
-      // 
-      //   // calculate corrected priors
-      //   v_tilde_sum += 0.5 * lambda_bar[t] * delta[t];
-      //   v_tilde[t] = v_j + v_tilde_sum;
-      // }
-      
-      // for (int t = 1; t < T; t++) {
-      //   log_pi_tilde_sum += -0.5 * lambda_bar[t-1] * delta[t-1];
-      //   log_pi_tilde[t] = log_pi_j(t,j) + log_pi_tilde_sum;
-      //   log_pi_tilde_max = std::max(log_pi_tilde_max, log_pi_tilde[t]);
-      // }
-      
-      // for (int t = 1; t < T; t++) {
-      //   log_pi_tilde[t] -= log_pi_tilde_max;
-      // }
-      
       for (int t = T-1; t >= 0; t--) {
-        if (t > T-t-1) {
-          mu_bar_jt = mu_lambda_j(t,j) / lambda_bar_j(t,j);
-          mu_bar_jT = mu_lambda_j(T-t-1,j) / lambda_bar_j(T-t-1,j);
-          // add back j^th component of residual
-          r_tilde[t] += mu_bar_jt;
-          r_tilde[T-t-1] += mu_bar_jT;
-          // divide out j^th component of precision
-          lambda_bar[t] /= lambda_bar_j(t,j);
-          lambda_bar[T-t-1] /= lambda_bar_j(T-t-1,j);
-          // subtract j^th component of variance correction
-          delta[t] +=  mu_bar_jt * mu_bar_jt - mu2_lambda_j(t,j) / lambda_bar_j(t,j);
-          delta[T-t-1] += mu_bar_jT * mu_bar_jT - mu2_lambda_j(T-t-1,j) / lambda_bar_j(T-t-1,j);
-        } else if (t == T-t-1) {
-          mu_bar_jt = mu_lambda_j(t,j) / lambda_bar_j(t,j);
-          // add back j^th component of residual
-          r_tilde[t] += mu_bar_jt;
-          // divide out j^th component of precision
-          lambda_bar[t] /= lambda_bar_j(t,j);
-          // subtract j^th component of variance correction
-          delta[t] += mu_bar_jt * mu_bar_jt - mu2_lambda_j(t,j) / lambda_bar_j(t,j);
-        }
+        // add back j^th component of residual
+        mu_bar_jt = mu_lambda_j(t,j) / lambda_bar_j(t,j);
+        r_tilde[t] += mu_bar_jt;
+        // divide out j^th component of precision
+        lambda_bar[t] /= lambda_bar_j(t,j);
+        // subtract j^th component of variance correction
+        delta[t] += mu_bar_jt * mu_bar_jt - mu2_lambda_j(t,j) / lambda_bar_j(t,j);
+        delta[t] = std::max(0.0, delta[t]);
 
         // calculate corrected priors
         v_tilde_sum += 0.5 * lambda_bar[t] * delta[t];
         v_tilde[t] = v_j + v_tilde_sum;
-        log_pi_tilde[T-t-1] = log_pi_j(T-t-1,j) + log_pi_tilde_sum;
-        log_pi_tilde_sum += -0.5 * lambda_bar[T-t-1] * delta[T-t-1];
-        log_pi_tilde_max = std::max(log_pi_tilde_max, log_pi_tilde[T-t-1]);
       }
+
+      for (int t = 1; t < T; t++) {
+        log_pi_tilde_sum += -0.5 * lambda_bar[t-1] * delta[t-1];
+        log_pi_tilde[t] = log_pi_j(t,j) + log_pi_tilde_sum;
+        log_pi_tilde_max = std::max(log_pi_tilde_max, log_pi_tilde[t]);
+      }
+      
+      // for (int t = T-1; t >= 0; t--) {
+      //   if (t > T-t-1) {
+      //     mu_bar_jt = mu_lambda_j(t,j) / lambda_bar_j(t,j);
+      //     mu_bar_jT = mu_lambda_j(T-t-1,j) / lambda_bar_j(T-t-1,j);
+      //     // add back j^th component of residual
+      //     r_tilde[t] += mu_bar_jt;
+      //     r_tilde[T-t-1] += mu_bar_jT;
+      //     // divide out j^th component of precision
+      //     lambda_bar[t] /= lambda_bar_j(t,j);
+      //     lambda_bar[T-t-1] /= lambda_bar_j(T-t-1,j);
+      //     // subtract j^th component of variance correction
+      //     delta[t] +=  mu_bar_jt * mu_bar_jt - mu2_lambda_j(t,j) / lambda_bar_j(t,j);
+      //     delta[T-t-1] += mu_bar_jT * mu_bar_jT - mu2_lambda_j(T-t-1,j) / lambda_bar_j(T-t-1,j);
+      //   } else if (t == T-t-1) {
+      //     mu_bar_jt = mu_lambda_j(t,j) / lambda_bar_j(t,j);
+      //     // add back j^th component of residual
+      //     r_tilde[t] += mu_bar_jt;
+      //     // divide out j^th component of precision
+      //     lambda_bar[t] /= lambda_bar_j(t,j);
+      //     // subtract j^th component of variance correction
+      //     delta[t] += mu_bar_jt * mu_bar_jt - mu2_lambda_j(t,j) / lambda_bar_j(t,j);
+      //   }
+      // 
+      //   // calculate corrected priors
+      //   v_tilde_sum += 0.5 * lambda_bar[t] * delta[t];
+      //   v_tilde[t] = v_j + v_tilde_sum;
+      //   log_pi_tilde[T-t-1] = log_pi_j(T-t-1,j) + log_pi_tilde_sum;
+      //   log_pi_tilde_sum += -0.5 * lambda_bar[T-t-1] * delta[T-t-1];
+      //   log_pi_tilde_max = std::max(log_pi_tilde_max, log_pi_tilde[T-t-1]);
+      // }
       
       for (int t = 1; t < T; t++) {
         log_pi_tilde[t] -= log_pi_tilde_max;
@@ -520,6 +517,7 @@ List mich_cpp(NumericVector y,
         lambda_bar[t] *= lambda_bar_j(t,j);
         // add back j^th component of variance correction
         delta[t] -= mu_bar_jt * mu_bar_jt - mu2_lambda_j(t,j) / lambda_bar_j(t,j);
+        delta[t] = std::max(0.0, delta[t]);
       }
     }
 
@@ -555,6 +553,8 @@ List mich_cpp(NumericVector y,
                          u_bar_k, v_bar_k, pi_bar_k,
                          lgamma_u_bar_k, digamma_u_bar_k, log_pi_bar_k,
                          u_k, v_k, log_u_k, lgamma_u_k, log_v_k, log_pi_k);
+    
+    if (std::isnan(elbo[iter])) throw std::runtime_error("NaN in elbo");
     if (verbose & (iter % 5000 == 0)) Rcout << "Iteration: " << iter << "; elbo: " << elbo[iter] << ";\n";
     if (std::abs((elbo[iter] - elbo[iter - 1]) / elbo[iter - 1]) < tol) break;
   }
@@ -599,7 +599,8 @@ List mich_cpp(NumericVector y,
     L_model =  List::create(_["pi_bar"] = pi_bar_l, 
                             _["b_bar"] = b_bar_l,
                             _["omega_bar"] = omega_bar_l, 
-                            _["mu_bar"] = mu_bar_l);
+                            _["mu_bar"] = mu_bar_l,
+                            _["mu2_bar"] = mu2_bar_l);
     result["mean_model"] = L_model;
   }
   if (K > 0) {

@@ -3,7 +3,7 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
                         tol, verbose, max_iter, reverse,
                         detect, merge_level, merge_prob, 
                         restart, n_restart, n_search, increment,
-                        omega_l, pi_l) {
+                        omega_l, log_pi_l) {
   
   #### set up ####
   # Flag for new model 
@@ -15,6 +15,12 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
   # calculate dimensions of y
   T <- nrow(y)
   d <- ncol(y)
+  
+  # min prob to keep component when restarting
+  keep_level <- 0.9
+  
+  # max times to merge
+  merge_counter = log(T) %/% 2
   
   # estimate precision matrix 
   if (fit_scale) {
@@ -43,7 +49,6 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
   } else mu_0 <- rep(0.0, d)
   
   # initializing posterior parameters 
-  log_pi_l <- log(pi_l)
   omega_bar_l <- omega_l + T - 1:T + 1
   log_omega_bar_l <- log(omega_bar_l)
   post_params <- list()
@@ -75,42 +80,54 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
       keep <- sapply(cred_sets, length) <= detect
       keep_mat <- matrix(FALSE, ncol = L, nrow = L)
       keep_mat[keep, keep] <- TRUE
+      diag(keep_mat) <- FALSE
       
-      # compute adjacency matrix from pairwise merge probabilities and keep_mat
-      merge_mat <- (t(pi_bar_l) %*% pi_bar_l > merge_prob) & keep_mat
+      # compute pairwise merge probabilities 
+      merge_prob_mat <- t(pi_bar_l) %*% pi_bar_l
+      diag(merge_prob_mat) <- 0
       
-      if (any(merge_mat[lower.tri(merge_mat)])) {
+      merge_residual <- fit$residual
+      
+      while (L > 1 & any(merge_prob_mat[keep_mat] > merge_prob)) {
         merged <- FALSE
+        L <- L - 1
+        merge_dex <- which(merge_prob_mat == max(merge_prob_mat[keep_mat]), arr.ind=TRUE)[1,]
         
-        # force transitivity
-        merge_mat <- force_adj(merge_mat)
-        diag(merge_mat) <- TRUE
+        mu_bar_merge <- Reduce("+", lapply(merge_dex, function(l) multi_mu_bar_fn(post_params[[l]][["b_bar"]], post_params[[l]][["pi_bar"]])))
+        merge_residual <- merge_residual + mu_bar_merge 
         
-        # combine and reset components
-        keep <- which(apply(merge_mat, 2, sum) == 1)
-        visited <- keep
-        for (i in 1:L) {
-          if (i %in% visited) next
-          merge_cand <- which(merge_mat[,i])
-          merger <- merge_cand[which.max(apply(pi_bar_l[,merge_cand], 2, max))]
-          mergees <- merge_cand[merge_cand != merger]
-          keep <- c(merger, keep)
-          visited <- c(merge_cand , visited)
-          
-          post_params[[merger]][["b_bar"]] <- Reduce("+", lapply(merge_cand, function(i) post_params[[i]][["b_bar"]]))
+        merge_fit <- multi_mean_scp(merge_residual, omega_bar_l, log_omega_bar_l, log_pi_l[,merge_dex[1]])
+        
+        post_params[[merge_dex[1]]][["pi_bar"]] <- merge_fit$pi_bar
+        pi_bar_l[,merge_dex[1]] <- merge_fit$pi_bar
+        post_params[[merge_dex[1]]][["log_pi_bar"]] <- merge_fit$log_pi_bar
+        post_params[[merge_dex[1]]][["b_bar"]] <- merge_fit$b_bar
+        
+        merge_residual <- merge_residual - multi_mu_bar_fn(post_params[[merge_dex[1]]][["b_bar"]], post_params[[merge_dex[1]]][["pi_bar"]]) 
+        
+        if (length(cred_set(pi_bar_l[,merge_dex[1]], level = merge_level)) > detect) {
+          keep_mat[merge_dex[1], ] <- FALSE
+          keep_mat[, merge_dex[1]] <- FALSE
         }
         
-        L <- length(keep)
-        if (L_auto) pi_l <- pi_l[,keep, drop = FALSE]
-        if (L_auto) log_pi_l <- log_pi_l[, keep, drop = FALSE]
-        post_params <- post_params[keep]
+        merge_prob_mat[merge_dex[1],-merge_dex] <- c(pi_bar_l[,merge_dex[1]] %*% pi_bar_l[,-merge_dex])
+        merge_prob_mat[-merge_dex, merge_dex[1]] <- merge_prob_mat[merge_dex[1],-merge_dex] 
+        merge_prob_mat <- merge_prob_mat[-merge_dex[1], -merge_dex[1]]
+        keep_mat <- keep_mat[-merge_dex[1], -merge_dex[1]]
+        
+        post_params[merge_dex[2]] <- NULL
+        pi_bar_l <- pi_bar_l[,-merge_dex[2]]
+        if (L_auto) {
+          log_pi_l <- log_pi_l[,-merge_dex[2], drop=FALSE]
+        }     
       }
     }
-    if (verbose & !merged) print("Merging components.")
+    if (verbose & !merged) print(paste0("Merging to L = ", L))
   }
   
   # if components were merged out use auto procedure to increase to desired JLK
   merge_flag <- (L < L_max & !L_auto)
+  merge_elbo <- -Inf
   if (merge_flag) increment <- 1 # ensures we don't overshoot number of components
   
   #### auto procedure ####
@@ -121,11 +138,10 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
     counter <- n_search
     elbo <- fit$elbo[length(fit$elbo)] # current value of elbo
     elbo_new <- elbo
-    merged_at_l <- c()
-    
+
     if (verbose) print(paste0("L = ", L, ": ELBO = ", elbo_new))
     
-    while (L < L_max & counter > 0) {
+    while (L < L_max) {
       # increment dimension of parameters
       for (i in 1:increment) {
         post_params[[L+i]] <- list(pi_bar = rep(1 / T, T),
@@ -136,23 +152,72 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
       
       L <- L + increment
       if (L > 1 & L_auto) {
-        pi_l <- cbind(matrix(pi_l[,1], nrow = T, ncol = increment), pi_l)
         log_pi_l <- cbind(matrix(log_pi_l[,1], nrow = T, ncol = increment), log_pi_l)
       }
       
-      #### fit new model and merge ####
-      merged <- FALSE
-      while (!merged) {
-        fit_new <- multi_mich_cpp(y, mu_0, fit_intercept, refit,
-                                  max_iter, tol, verbose = FALSE,  
-                                  omega_l, log_pi_l, omega_bar_l, log_omega_bar_l,
-                                  post_params)
+      # fit incremented model
+      fit_new <- multi_mich_cpp(y, mu_0, fit_intercept, refit,
+                                max_iter, tol, verbose = FALSE,  
+                                omega_l, log_pi_l, omega_bar_l, log_omega_bar_l,
+                                post_params)
+      
+      # test if model improved or merge/restart ####
+      if (!refit) refit <- TRUE
+      elbo_new <- fit_new$elbo[length(fit_new$elbo)]
+      if (verbose) print(paste0("L = ", L, ": ELBO = ", elbo_new,"; Counter: ", counter))
+      
+      if (elbo_new > elbo | merge_flag) {
+        elbo <- elbo_new
+        fit <- fit_new
+        counter <- n_search
+        if (last_restart < Inf) restart <- TRUE 
+      } else if (counter == 0 & restart) {
+        if (verbose) print(paste0("Restarting at L = ", L))
+        restart <- FALSE
+        last_restart <- L
+        counter <- n_search
         
-        merged <- TRUE
-        refit <- TRUE
+        pi_bar_l <- sapply(1:L, function(l) post_params[[l]][["pi_bar"]])
         
-        if (L > 1) {
-          # extract prob matrix
+        # reorder by longest blocks first
+        chp <- apply(pi_bar_l, 2, which.max)
+        chp_order <- order(chp)
+        chp <- chp[chp_order]
+        
+        post_params <- post_params[chp_order]
+        
+        diff_order <- order(diff(c(chp, T)))
+        
+        post_params <- post_params[diff_order]
+        
+        keep <- apply(pi_bar_l, 2, max) > keep_level
+        
+        if (sum(keep) < L) {
+          keep_inc <- max(sum(!keep) - increment, 0)
+          L <- sum(keep) + keep_inc
+          L <- L - increment
+          
+          log_pi_l <- sapply(1:L, function(i) log_pi_l[,1, drop = FALSE])
+          post_params <- post_params[c(which(!keep)[seq_len(keep_inc)], which(keep))]
+          for (l in seq_len(keep_inc)) {
+            post_params[[l]] <- list(pi_bar = rep(1 / T, T),
+                                     log_pi_bar = rep(0.0, T),
+                                     b_bar = matrix(0.0, nrow = T, ncol = d))
+          }
+        }
+      } else if (counter == 0 | L == L_max) {
+        # merging 
+        counter <- n_search # reset counter in case searching continues
+        merge_counter <- merge_counter - 1
+        no_merges <- TRUE 
+        merged <- FALSE
+        if (verbose) print(paste0("Merging. Merge Counter: ", merge_counter))
+        
+        L <- fit$L
+        merge_residual <- fit$residual
+        if (L >= 1) {
+          post_params <- fit$post_params
+          # extract prob matrix and resid
           pi_bar_l <- sapply(1:L, function(l) post_params[[l]][["pi_bar"]])
           
           # test which columns actually contain change-points
@@ -160,69 +225,67 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
           keep <- sapply(cred_sets, length) <= detect
           keep_mat <- matrix(FALSE, ncol = L, nrow = L)
           keep_mat[keep, keep] <- TRUE
+          diag(keep_mat) <- FALSE
           
-          # compute adjacency matrix from pairwise merge probabilities and keep_mat
-          merge_mat <- (t(pi_bar_l) %*% pi_bar_l > merge_prob) & keep_mat
+          # compute pairwise merge probabilities 
+          merge_prob_mat <- t(pi_bar_l) %*% pi_bar_l
+          diag(merge_prob_mat) <- 0
+        }  
+        
+        while (!merged & L > 0) {
+          merged <- TRUE
+          fit <- multi_mich_cpp(y, mu_0, fit_intercept, refit = TRUE,
+                                max_iter = ifelse(no_merges, 1, max_iter), tol, 
+                                verbose = FALSE,  
+                                omega_l, log_pi_l, omega_bar_l, log_omega_bar_l,
+                                post_params)
           
-          if (any(merge_mat[lower.tri(merge_mat)]) & !(L %in% merged_at_l)) {
+          while (L > 1 & any(merge_prob_mat[keep_mat] > merge_prob)) {
+            no_merges <- FALSE
             merged <- FALSE
+            L <- L - 1
+            merge_dex <- which(merge_prob_mat == max(merge_prob_mat[keep_mat]), arr.ind=TRUE)[1,]
             
-            # keep track of where merges occur
-            merged_at_l <- c(merged_at_l, L)
+            mu_bar_merge <- Reduce("+", lapply(merge_dex, function(l) multi_mu_bar_fn(post_params[[l]][["b_bar"]], post_params[[l]][["pi_bar"]])))
+            merge_residual <- merge_residual + mu_bar_merge 
             
-            # force transitivity
-            merge_mat <- force_adj(merge_mat)
-            diag(merge_mat) <- TRUE
-            
-            # combine and reset components
-            keep <- which(apply(merge_mat, 2, sum) == 1)
-            visited <- keep
-            for (i in 1:L) {
-              if (i %in% visited) next
-              merge_cand <- which(merge_mat[,i])
-              merger <- merge_cand[which.max(apply(pi_bar_l[,merge_cand], 2, max))]
-              mergees <- merge_cand[merge_cand != merger]
-              keep <- c(merger, keep)
-              visited <- c(merge_cand , visited)
-              
-              post_params[[merger]][["b_bar"]] <- Reduce("+", lapply(merge_cand, function(i) post_params[[i]][["b_bar"]]))
+            if (max(pi_bar_l[,merge_dex[2]]) > max(pi_bar_l[,merge_dex[1]])) {
+              pi_bar_l[,merge_dex[1]] <- pi_bar_l[,merge_dex[2]] 
+              post_params[[merge_dex[1]]][["log_pi_bar"]] <- post_params[[merge_dex[2]]][["log_pi_bar"]] 
             }
             
-            counter <- counter + L - length(keep)
+            post_params[[merge_dex[1]]][["b_bar"]] <- post_params[[merge_dex[1]]][["b_bar"]] + post_params[[merge_dex[2]]][["b_bar"]]
             
-            L <- length(keep)
-            if (L_auto) pi_l <- pi_l[,keep, drop = FALSE]
-            if (L_auto) log_pi_l <- log_pi_l[, keep, drop = FALSE]
-            post_params <- post_params[keep]
+            merge_residual <- merge_residual - multi_mu_bar_fn(post_params[[merge_dex[1]]][["b_bar"]], post_params[[merge_dex[1]]][["pi_bar"]]) 
+            
+            if (length(cred_set(pi_bar_l[,merge_dex[1]], level = merge_level)) > detect) {
+              keep_mat[merge_dex[1], ] <- FALSE
+              keep_mat[, merge_dex[1]] <- FALSE
+            }
+            
+            merge_prob_mat[merge_dex[1],-merge_dex] <- c(pi_bar_l[,merge_dex[1]] %*% pi_bar_l[,-merge_dex])
+            merge_prob_mat[-merge_dex, merge_dex[1]] <- merge_prob_mat[merge_dex[1],-merge_dex] 
+            merge_prob_mat <- merge_prob_mat[-merge_dex[1], -merge_dex[1]]
+            keep_mat <- keep_mat[-merge_dex[1], -merge_dex[1]]
+            
+            post_params[merge_dex[2]] <- NULL
+            pi_bar_l <- pi_bar_l[,-merge_dex[2]]
+            if (L_auto) {
+              log_pi_l <- log_pi_l[,-merge_dex[2], drop=FALSE]
+            }     
           }
+          if (verbose & !merged) print(paste0("Merging to L = ", L))
         }
-      }
-      
-      # test if model improved or restart ####
-      if (!refit) refit <- TRUE
-      elbo_new <- fit_new$elbo[length(fit_new$elbo)]
-      if (verbose) print(paste0("L = ", L, ": ELBO = ", elbo_new, 
-                                "; Counter: ", counter))
-      
-      if (elbo_new > elbo | merge_flag) {
-        elbo <- elbo_new
-        fit <- fit_new
-        counter <- n_search
-        if (last_restart < Inf) restart <- TRUE 
-      } else if (restart & L_auto & L - n_restart > last_restart) {
-        refit <- FALSE
-        restart <- FALSE
-        last_restart <- L
-        n_restart <- n_restart + 1
         
-        L <- L - increment
-        pi_l <- sapply(1:L, function(i) pi_l[,1])
-        log_pi_l <- sapply(1:L, function(i) log_pi_l[,1])
-        post_params <- list()
-        for (l in 1:L) {
-          post_params[[l]] <- list(pi_bar = rep(1 / T, T),
-                                   log_pi_bar = rep(00.0, T),
-                                   b_bar = matrix(0.0, nrow = T, ncol = d))
+        elbo <- max(fit$elbo)
+        if (elbo > merge_elbo) {
+          merge_elbo <- elbo
+          fit_merge <- fit
+        }
+        
+        if (no_merges | merge_counter == 0) {
+          fit <- fit_merge
+          break
         }
       } else {
         counter <- counter - 1
@@ -242,13 +305,14 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
 
     # don't reverse weighted priors
     if (!pi_l_weighted) {
-      pi_l <- pi_l[T:1,1:max(1,L),drop = FALSE]
       log_pi_l <- log_pi_l[T:1,1:max(1,L),drop = FALSE]
+    } else {
+      log_pi_l <- sapply(1:max(1,L), function(i) log_pi_l[,1])
     }
     
     # reversing mean components
     post_params <- fit$post_params
-    pi_bar_l <- sapply(1:L, function(l) post_params[[l]][["pi_bar"]])
+    if (L > 0) pi_bar_l <- sapply(1:L, function(l) post_params[[l]][["pi_bar"]])
 
     for (l in seq_len(L)) {
       tau_l <- which.max(pi_bar_l[,l])
@@ -258,16 +322,77 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
       
       fit_scp <- multi_mean_scp(r_bar_l, omega_bar_l, log_omega_bar_l, log_pi_l[,l])
       
+      pi_bar_l[,l] <- fit_scp$pi_bar
       post_params[[l]][["pi_bar"]] <- fit_scp$pi_bar
       post_params[[l]][["log_pi_bar"]] <- fit_scp$log_pi_bar
       post_params[[l]][["b_bar"]] <- fit_scp$b_bar
     }
     
     #### fit model ####
-    fit <- multi_mich_cpp(y[T:1,], mu_0, fit_intercept, refit = TRUE,
-                          max_iter, tol, verbose = verbose & !L_auto,  
-                          omega_l, log_pi_l, omega_bar_l, log_omega_bar_l,
-                          post_params)
+    merged <- FALSE
+
+    while (!merged & L >= 1) {
+      fit <- multi_mich_cpp(y[T:1,], mu_0, fit_intercept, refit = TRUE,
+                            max_iter = max_iter, tol, 
+                            verbose = FALSE & !L_auto,  
+                            omega_l, log_pi_l, omega_bar_l, log_omega_bar_l,
+                            post_params)
+      
+      merged <- TRUE
+      refit <- TRUE
+      
+      merge_residual <- fit$residual
+      
+      # extract prob matrix and resid
+      pi_bar_l <- sapply(1:L, function(l) post_params[[l]][["pi_bar"]])
+      
+      # test which columns actually contain change-points
+      cred_sets <- apply(pi_bar_l, 2, cred_set, level = merge_level, simplify = FALSE)
+      keep <- sapply(cred_sets, length) <= detect
+      keep_mat <- matrix(FALSE, ncol = L, nrow = L)
+      keep_mat[keep, keep] <- TRUE
+      diag(keep_mat) <- FALSE
+      
+      # compute pairwise merge probabilities 
+      merge_prob_mat <- t(pi_bar_l) %*% pi_bar_l
+      diag(merge_prob_mat) <- 0
+      
+      while (L > 1 & any(merge_prob_mat[keep_mat] > merge_prob)) {
+        merged <- FALSE
+        L <- L - 1
+        merge_dex <- which(merge_prob_mat == max(merge_prob_mat[keep_mat]), arr.ind=TRUE)[1,]
+        
+        mu_bar_merge <- Reduce("+", lapply(merge_dex, function(l) multi_mu_bar_fn(post_params[[l]][["b_bar"]], post_params[[l]][["pi_bar"]])))
+        merge_residual <- merge_residual + mu_bar_merge 
+        
+        if (max(pi_bar_l[,merge_dex[2]]) > max(pi_bar_l[,merge_dex[1]])) {
+          pi_bar_l[,merge_dex[1]] <- pi_bar_l[,merge_dex[2]] 
+          post_params[[merge_dex[1]]][["pi_bar"]] <- post_params[[merge_dex[2]]][["pi_bar"]] 
+          post_params[[merge_dex[1]]][["log_pi_bar"]] <- post_params[[merge_dex[2]]][["log_pi_bar"]] 
+        }
+        
+        post_params[[merge_dex[1]]][["b_bar"]] <- post_params[[merge_dex[1]]][["b_bar"]] + post_params[[merge_dex[2]]][["b_bar"]]
+        
+        merge_residual <- merge_residual - multi_mu_bar_fn(post_params[[merge_dex[1]]][["b_bar"]], post_params[[merge_dex[1]]][["pi_bar"]]) 
+        
+        if (length(cred_set(pi_bar_l[,merge_dex[1]], level = merge_level)) > detect) {
+          keep_mat[merge_dex[1], ] <- FALSE
+          keep_mat[, merge_dex[1]] <- FALSE
+        }
+        
+        merge_prob_mat[merge_dex[1],-merge_dex] <- c(pi_bar_l[,merge_dex[1]] %*% pi_bar_l[,-merge_dex])
+        merge_prob_mat[-merge_dex, merge_dex[1]] <- merge_prob_mat[merge_dex[1],-merge_dex] 
+        merge_prob_mat <- merge_prob_mat[-merge_dex[1], -merge_dex[1]]
+        keep_mat <- keep_mat[-merge_dex[1], -merge_dex[1]]
+        
+        post_params[merge_dex[2]] <- NULL
+        pi_bar_l <- pi_bar_l[,-merge_dex[2]]
+        if (L_auto) {
+          log_pi_l <- log_pi_l[,-merge_dex[2], drop=FALSE]
+        }     
+      }
+      if (verbose & !merged) print(paste0("Merging to L = ", L))
+    }
   }
   
   #### return model ####
@@ -283,7 +408,7 @@ mich_matrix <- function(y, fit_intercept, fit_scale,
     }
   }
   
-  if (fit$L > 0) fit$pi_bar_l <- sapply(1:fit$L, function(l) fit$post_params[[l]][["pi_bar"]])
+  if (fit$L > 0) fit$pi_bar <- sapply(1:fit$L, function(l) fit$post_params[[l]][["pi_bar"]])
   fit$Sigma <- Sigma
   
   return(fit)

@@ -44,13 +44,13 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
   if (T < 2) stop("y must have at least 2 observations.")
   
   #### merge and detect defaults ####
-  delta <- 0.01
+  delta <- 0.5
   merge_level <- scalar_check(merge_level)
   if (merge_level < 0 | merge_level > 1) stop("merge_level must be in [0,1].")
-  detect <- ceiling(log(T)^(2 + delta))
+  detect <- ceiling(log(T)^(1 + delta))
   if (is.null(merge_prob)) merge_prob <- detect / T^2
   merge_prob <- scalar_check(merge_prob)
-  n_search <- ceiling(log(T) / increment)
+  n_search <- max(4, ceiling(log(T) / ((1 + restart) * increment)))
 
   #### checking other model parameters ####
   max_iter <- integer_check(max_iter)
@@ -93,13 +93,11 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
   pi_j <- prob_check(pi_j, J, T)
   pi_j_weighted <- (pi_j == "weighted")
   if (J_auto & length(pi_j) > 1) stop("When J_auto = TRUE, pi_j must one of 'uniform' or 'weighted'.")
-  if (J == 0 & !J_auto) {
-    pi_j <- matrix(1, nrow =  T) 
-  } else if (is.character(pi_j) & (J_auto | J > 0)) {
-    if (pi_j == "weighted") pi_j <- meanvar_prior(T)
-    else if (pi_j == "uniform") pi_j <- rep(1, T) 
-    pi_j <- sapply(1:max(1, J), function(i) pi_j)
-  } 
+  if (is.character(pi_j)) {
+    if (pi_j == "weighted") log_pi_j <- log_meanvar_prior(T)
+    else if (pi_j == "uniform") log_pi_j <- rep(0, T) 
+    log_pi_j <- sapply(1:max(1, J), function(i) log_pi_j)
+  } else log_pi_j <- log(pi_j)
   
   # L components
   omega_l <- scalar_check(omega_l)
@@ -107,13 +105,11 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
   pi_l <- prob_check(pi_l, L, T)
   pi_l_weighted <- (pi_l == "weighted")
   if (L_auto & length(pi_l) > 1) stop("When L_auto = TRUE, pi_l must one of 'uniform' or 'weighted'.")
-  if (L == 0 & !L_auto) {
-    pi_l <- matrix(1, nrow =  T)
-  } else if (is.character(pi_l) & (L_auto | L > 0)) {
-    if (pi_l == "weighted") pi_l <- mean_prior(T, d)
-    else if (pi_l == "uniform") pi_l <- rep(1, T) 
-    pi_l <- sapply(1:max(1, L), function(i) pi_l)
-  } 
+  if (is.character(pi_l)) {
+    if (pi_l == "weighted") log_pi_l <- log_mean_prior(T, floor(1.5 * d))
+    else if (pi_l == "uniform") log_pi_l <- rep(0, T) 
+    log_pi_l <- sapply(1:max(1, L), function(i) log_pi_l)
+  } else log_pi_l <- log(pi_l)
 
   # K components
   u_k <- scalar_check(u_k)
@@ -122,13 +118,11 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
   pi_k <- prob_check(pi_k, K, T)
   pi_k_weighted <- (pi_k == "weighted")
   if (K_auto & length(pi_k) > 1) stop("When K_auto = TRUE, pi_k must one of 'uniform' or 'weighted'.")
-  if (K == 0 & !K_auto) {
-    pi_k <- matrix(1, nrow =  T)
-  } else if (is.character(pi_k) & (K_auto | K > 0)) {
-    if (pi_k == "weighted") pi_k <- var_prior(T)
-    else if (pi_k == "uniform") pi_k <- rep(1, T) 
-    pi_k <- sapply(1:max(1, K), function(i) pi_k)
-  } 
+  if (is.character(pi_k)) {
+    if (pi_k == "weighted") log_pi_k <- log_var_prior(T)
+    else if (pi_k == "uniform") log_pi_k <- rep(0, T) 
+    log_pi_k <- sapply(1:max(1, K), function(i) log_pi_k)
+  } else log_pi_k <- log(pi_k)
 
   # call multivariate or univariate MICH
   if (is.matrix(y)) {
@@ -146,20 +140,20 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
                   tol, verbose, max_iter, reverse,
                   detect, merge_level, merge_prob, 
                   restart, n_restart, n_search, increment,
-                  omega_l, pi_l)
+                  omega_l, log_pi_l)
     } else {
       mich_matrix(y, fit_intercept, fit_scale,
                   L, L_auto, L_max, pi_l_weighted,
                   tol, verbose, max_iter, reverse,
                   detect, merge_level, merge_prob, 
                   restart, n_restart, n_search, increment,
-                  omega_l, pi_l)
+                  omega_l, log_pi_l)
     }
   } else {
     if (reverse) {
-      if (!pi_l_weighted) pi_l <- pi_l[T:1,,drop = FALSE]
-      if (!pi_k_weighted) pi_k <- pi_k[T:1,,drop = FALSE]
-      if (!pi_j_weighted) pi_j <- pi_j[T:1,,drop = FALSE]
+      if (!pi_l_weighted) log_pi_l <- log_pi_l[T:1,,drop = FALSE]
+      if (!pi_k_weighted) log_pi_k <- log_pi_k[T:1,,drop = FALSE]
+      if (!pi_j_weighted) log_pi_j <- log_pi_j[T:1,,drop = FALSE]
       
       mich_vector(y[T:1], fit_intercept = TRUE, fit_scale = TRUE,
                   J, L, K, J_auto, L_auto, K_auto, J_max, L_max, K_max,
@@ -167,9 +161,9 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
                   tol, verbose, max_iter, reverse,
                   detect, merge_level, merge_prob, 
                   restart, n_restart, n_search, increment,
-                  omega_j, u_j, v_j, pi_j, 
-                  omega_l, pi_l, 
-                  u_k, v_k, pi_k)
+                  omega_j, u_j, v_j, log_pi_j, 
+                  omega_l, log_pi_l, 
+                  u_k, v_k, log_pi_k)
     } else {
       mich_vector(y, fit_intercept, fit_scale,
                   J, L, K, J_auto, L_auto, K_auto, J_max, L_max, K_max,
@@ -177,9 +171,9 @@ mich <- function(y, fit_intercept = TRUE, fit_scale = TRUE,
                   tol, verbose, max_iter, reverse,
                   detect, merge_level, merge_prob, 
                   restart, n_restart, n_search, increment,
-                  omega_j, u_j, v_j, pi_j, 
-                  omega_l, pi_l, 
-                  u_k, v_k, pi_k)
+                  omega_j, u_j, v_j, log_pi_j, 
+                  omega_l, log_pi_l, 
+                  u_k, v_k, log_pi_k)
     }
   }
 }
